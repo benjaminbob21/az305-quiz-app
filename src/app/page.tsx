@@ -41,15 +41,25 @@ export interface SolutionItem {
 }
 
 export interface CaseStudyQuestion {
-  id: number;
+  id?: number;
+  questionNumber?: number;
   question: string;
   options?: string[];
-  correctAnswer?: string | string[];
+  correctAnswer?: string;
+  correctAnswers?: string[];
   explanation?: string;
+  wrongOptionsExplanation?: Record<string, string>;
   questionType?: string;
   statements?: StatementItem[];
   mapping?: MappingItem[];
   pairs?: PairItem[];
+  subQuestions?: SubQuestion[];
+}
+
+export interface CaseStudySection {
+  id?: string;
+  title: string;
+  content: string;
 }
 
 export interface Question {
@@ -63,6 +73,7 @@ export interface Question {
   note?: string;
   options?: string[];
   correctAnswer?: string | string[];
+  correctAnswers?: string[];
   explanation?: string;
   reference?: string;
   references?: string[];
@@ -74,8 +85,10 @@ export interface Question {
   distractors?: string[];
   subQuestions?: SubQuestion[];
   correctOrder?: string[];
+  correctPipeline?: string[];
+  pipeline?: { step: string; name: string }[];
   solutions?: SolutionItem[];
-  sections?: { title: string; content: string }[];
+  sections?: CaseStudySection[];
   questions?: CaseStudyQuestion[];
 }
 
@@ -87,7 +100,7 @@ const DOMAINS = [
   "Design Identity, Governance, and Monitoring Solutions",
 ];
 
-// Helper to normalize domain names (e.g. merge Non-Relational Data Storage into Data Storage)
+// Helper to normalize domain names
 function normalizeDomain(domain: string): string {
   if (domain === "Design Non-Relational Data Storage Solutions") {
     return "Design Data Storage Solutions";
@@ -122,6 +135,9 @@ export default function AZ305App() {
   const [flaggedIds, setFlaggedIds] = useState<number[]>([]);
   const [userAnswers, setUserAnswers] = useState<Record<number, any>>({});
   const [searchQuery, setSearchQuery] = useState<string>("");
+
+  // Case Study Active Tab State
+  const [activeCaseSection, setActiveCaseSection] = useState<number>(0);
 
   // Timer State
   const [timeRemaining, setTimeRemaining] = useState<number>(100 * 60);
@@ -203,6 +219,7 @@ export default function AZ305App() {
     setShowPalette(false);
     setSearchQuery("");
     setMode(chosenMode);
+    setActiveCaseSection(0);
 
     // Setup Timer
     const durationSeconds = customTimeMinutes * 60;
@@ -292,6 +309,19 @@ export default function AZ305App() {
     });
   };
 
+  const handleCaseChildAnswer = (qid: number, childIdx: number, val: any) => {
+    setUserAnswers((prev) => {
+      const currentMap = prev[qid] || {};
+      return {
+        ...prev,
+        [qid]: {
+          ...currentMap,
+          [childIdx]: val,
+        },
+      };
+    });
+  };
+
   // Evaluation algorithm for calculating scores accurately
   const evaluateQuestion = (q: Question, ans: any): boolean => {
     if (!ans) return false;
@@ -309,7 +339,7 @@ export default function AZ305App() {
       if (!Array.isArray(ans)) return false;
       const expected = Array.isArray(q.correctAnswer)
         ? q.correctAnswer
-        : [q.correctAnswer || ""];
+        : q.correctAnswers || [q.correctAnswer || ""];
       if (ans.length !== expected.length) return false;
       return expected.every((val) => ans.includes(val));
     }
@@ -323,6 +353,14 @@ export default function AZ305App() {
       return q.statements.every((s, idx) => ans[idx] === s.correctAnswer);
     }
 
+    // Dropdown / Hotspot or Matching with subQuestions (e.g. Q2, Q4, Q12, Q30, Q36)
+    if (q.subQuestions && q.subQuestions.length > 0) {
+      return q.subQuestions.every((sq, idx) => {
+        const userChoice = ans[idx.toString()] || ans[sq.prompt || ""];
+        return userChoice === sq.correctAnswer;
+      });
+    }
+
     // Dropdown Matching
     if (q.questionType === "Dropdown / Matching" && q.mapping) {
       return q.mapping.every((m) => ans[m.component] === m.selectedOption);
@@ -333,12 +371,33 @@ export default function AZ305App() {
       return q.pairs.every((p) => ans[p.requirement] === p.answer);
     }
 
+    // Drag and drop ordering
+    if (q.questionType === "Drag and Drop / Ordering") {
+      const order = q.correctOrder || q.correctPipeline || [];
+      return order.every((val, idx) => ans[idx.toString()] === val);
+    }
+
     // Solution Evaluation series
     if (
       q.questionType === "Case Study / Solution Evaluation Series" &&
       q.solutions
     ) {
       return q.solutions.every((sol) => ans[sol.part.toString()] === sol.correctAnswer);
+    }
+
+    // Case Study with child questions
+    if (q.questionType === "Case Study" && q.questions) {
+      return q.questions.every((cq, idx) => {
+        const cAns = ans[idx];
+        if (!cAns) return false;
+        if (cq.correctAnswers && Array.isArray(cAns)) {
+          return (
+            cq.correctAnswers.length === cAns.length &&
+            cq.correctAnswers.every((a) => cAns.includes(a))
+          );
+        }
+        return cAns === cq.correctAnswer;
+      });
     }
 
     return false;
@@ -852,10 +911,10 @@ export default function AZ305App() {
           </div>
         </div>
 
-        {/* Center Timer Display */}
-        <div className="flex items-center gap-4">
+        {/* Center Timer Display & Actions */}
+        <div className="flex items-center gap-3 sm:gap-4">
           <div
-            className={`px-3.5 py-1.5 rounded-xl border text-xs sm:text-sm font-mono font-bold flex items-center gap-2 ${
+            className={`px-3 py-1.5 rounded-xl border text-xs sm:text-sm font-mono font-bold flex items-center gap-2 ${
               isTimed && timeRemaining < 300
                 ? "bg-rose-500/20 border-rose-500/40 text-rose-300 animate-pulse"
                 : "bg-slate-800 border-slate-700 text-slate-200"
@@ -938,6 +997,30 @@ export default function AZ305App() {
             </div>
           )}
 
+          {/* Case Study Sections Tabs if present (e.g. Q63, Q103) */}
+          {currentQ.sections && currentQ.sections.length > 0 && (
+            <div className="mb-6 rounded-2xl border border-slate-700 bg-slate-950/60 overflow-hidden">
+              <div className="flex flex-wrap border-b border-slate-800 bg-slate-850/60">
+                {currentQ.sections.map((sec, secIdx) => (
+                  <button
+                    key={secIdx}
+                    onClick={() => setActiveCaseSection(secIdx)}
+                    className={`px-4 py-2.5 text-xs font-bold transition-colors border-b-2 ${
+                      activeCaseSection === secIdx
+                        ? "border-blue-500 text-white bg-slate-800"
+                        : "border-transparent text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    {sec.title}
+                  </button>
+                ))}
+              </div>
+              <div className="p-4 text-xs sm:text-sm text-slate-300 leading-relaxed whitespace-pre-line max-h-64 overflow-y-auto">
+                {currentQ.sections[activeCaseSection]?.content}
+              </div>
+            </div>
+          )}
+
           {/* Context Table if present */}
           {currentQ.contextTable && currentQ.contextTable.length > 0 && (
             <div className="overflow-x-auto my-4 rounded-xl border border-slate-700 bg-slate-950/60 p-2">
@@ -973,9 +1056,11 @@ export default function AZ305App() {
             </div>
           )}
 
-          {/* Interactive Inputs */}
+          {/* ==================================================== */}
+          {/* INTERACTIVE INPUTS: ALL QUESTION TYPES SUPPORTED     */}
+          {/* ==================================================== */}
           <div className="mt-4">
-            {/* Multiple Choice */}
+            {/* 1. Multiple Choice */}
             {currentQ.questionType === "Multiple Choice" && currentQ.options && (
               <div className="grid gap-3">
                 {currentQ.options.map((opt, oIdx) => {
@@ -1020,7 +1105,7 @@ export default function AZ305App() {
               </div>
             )}
 
-            {/* Multiple Select */}
+            {/* 2. Multiple Select / Multiple Choice (Select Two) */}
             {(currentQ.questionType === "Multiple Select" ||
               currentQ.questionType === "Multiple Choice (Select Two)") &&
               currentQ.options && (
@@ -1033,7 +1118,7 @@ export default function AZ305App() {
                     const isSelected = selectedList.includes(opt);
                     const correctAnswers = Array.isArray(currentQ.correctAnswer)
                       ? currentQ.correctAnswer
-                      : [currentQ.correctAnswer];
+                      : currentQ.correctAnswers || [currentQ.correctAnswer || ""];
                     const isCorrect = correctAnswers.includes(opt);
 
                     let cardStyle =
@@ -1075,7 +1160,7 @@ export default function AZ305App() {
                 </div>
               )}
 
-            {/* Yes/No Statements Table */}
+            {/* 3. Yes/No Statements Table */}
             {(currentQ.questionType === "Yes/No Statements Table" ||
               currentQ.questionType === "Yes/No Statements") &&
               currentQ.statements && (
@@ -1143,7 +1228,67 @@ export default function AZ305App() {
                 </div>
               )}
 
-            {/* Dropdown / Matching */}
+            {/* 4. Dropdown / Hotspot & SubQuestions (e.g. Q2, Q4, Q12, Q30, Q36, etc.) */}
+            {currentQ.subQuestions && currentQ.subQuestions.length > 0 && (
+              <div className="grid gap-4">
+                {currentQ.subQuestions.map((sq, sqIdx) => {
+                  const currentSelections = currentAnswer || {};
+                  const userVal = currentSelections[sqIdx.toString()] || currentSelections[sq.prompt || ""] || "";
+                  const isCorrect = userVal === sq.correctAnswer;
+                  const availableOptions = sq.options || currentQ.availableOptions || [];
+
+                  return (
+                    <div
+                      key={sqIdx}
+                      className="p-4 sm:p-5 rounded-2xl bg-slate-850 border border-slate-700/80 flex flex-col gap-3"
+                    >
+                      <div className="text-sm font-semibold text-slate-200">
+                        {sq.prompt || `Item ${sqIdx + 1}`}
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                        <select
+                          value={userVal}
+                          onChange={(e) =>
+                            handleDropdownSelect(currentQ.id, sqIdx.toString(), e.target.value)
+                          }
+                          className="bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1"
+                        >
+                          <option value="">-- Select from dropdown --</option>
+                          {availableOptions.map((opt, oIdx) => (
+                            <option key={oIdx} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+
+                        {showAnswer && mode === "study" && (
+                          <div className="shrink-0">
+                            <span
+                              className={`px-3 py-1.5 text-xs rounded-xl font-bold border inline-block ${
+                                isCorrect
+                                  ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                                  : "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                              }`}
+                            >
+                              {isCorrect ? "✓ Correct" : `Target: ${sq.correctAnswer}`}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {showAnswer && mode === "study" && sq.explanation && (
+                        <div className="text-xs text-slate-400 bg-slate-900/60 p-3 rounded-lg border border-slate-800 leading-relaxed">
+                          💡 {sq.explanation}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* 5. Dropdown / Matching with mapping */}
             {currentQ.questionType === "Dropdown / Matching" && currentQ.mapping && (
               <div className="grid gap-4">
                 {currentQ.mapping.map((m, mIdx) => {
@@ -1192,11 +1337,12 @@ export default function AZ305App() {
               </div>
             )}
 
-            {/* Drag and Drop / Matching */}
+            {/* 6. Drag and Drop / Matching with pairs */}
             {currentQ.questionType === "Drag and Drop / Matching" &&
-              (currentQ.pairs || currentQ.subQuestions) && (
+              currentQ.pairs &&
+              !currentQ.subQuestions && (
                 <div className="grid gap-3">
-                  {(currentQ.pairs || []).map((p, pIdx) => {
+                  {currentQ.pairs.map((p, pIdx) => {
                     const currentSelections = currentAnswer || {};
                     const userVal = currentSelections[p.requirement] || "";
                     const isCorrect = userVal === p.answer;
@@ -1243,7 +1389,64 @@ export default function AZ305App() {
                 </div>
               )}
 
-            {/* Solution Evaluation Series */}
+            {/* 7. Drag and Drop / Ordering (e.g. Q74, Q79) */}
+            {currentQ.questionType === "Drag and Drop / Ordering" && (
+              <div className="grid gap-3">
+                <p className="text-xs text-blue-400 font-semibold mb-1">
+                  Place the following steps in the correct sequence.
+                </p>
+                {(currentQ.correctOrder || currentQ.correctPipeline || currentQ.availableOptions || []).map(
+                  (_, oIdx) => {
+                    const currentSelections = currentAnswer || {};
+                    const userVal = currentSelections[oIdx.toString()] || "";
+                    const targetVal =
+                      currentQ.correctOrder?.[oIdx] || currentQ.correctPipeline?.[oIdx];
+                    const isCorrect = userVal === targetVal;
+                    const options = currentQ.availableOptions || [];
+
+                    return (
+                      <div
+                        key={oIdx}
+                        className="p-4 rounded-xl bg-slate-850 border border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        <span className="text-sm font-bold text-slate-200">
+                          Step {oIdx + 1}:
+                        </span>
+                        <div className="flex items-center gap-2 flex-1 max-w-md">
+                          <select
+                            value={userVal}
+                            onChange={(e) =>
+                              handleDropdownSelect(currentQ.id, oIdx.toString(), e.target.value)
+                            }
+                            className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 w-full"
+                          >
+                            <option value="">-- Select step --</option>
+                            {options.map((opt, optIdx) => (
+                              <option key={optIdx} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                          {showAnswer && mode === "study" && (
+                            <span
+                              className={`px-2 py-1 text-xs rounded-md font-semibold shrink-0 ${
+                                isCorrect
+                                  ? "bg-emerald-500/20 text-emerald-400"
+                                  : "bg-rose-500/20 text-rose-400"
+                              }`}
+                            >
+                              Correct: {targetVal}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
+                )}
+              </div>
+            )}
+
+            {/* 8. Solution Evaluation Series */}
             {currentQ.questionType === "Case Study / Solution Evaluation Series" &&
               currentQ.solutions && (
                 <div className="grid gap-6">
@@ -1306,6 +1509,142 @@ export default function AZ305App() {
                   })}
                 </div>
               )}
+
+            {/* 9. Case Study with Child Questions (e.g. Q63, Q103) */}
+            {currentQ.questionType === "Case Study" && currentQ.questions && (
+              <div className="grid gap-6">
+                <div className="text-xs font-bold text-blue-400 uppercase tracking-wider">
+                  Case Study Questions ({currentQ.questions.length})
+                </div>
+                {currentQ.questions.map((cq, cqIdx) => {
+                  const ansMap = currentAnswer || {};
+                  const childAns = ansMap[cqIdx];
+
+                  return (
+                    <div
+                      key={cqIdx}
+                      className="p-5 rounded-2xl bg-slate-850 border border-slate-700/80 flex flex-col gap-4"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-400">
+                          Question {cq.questionNumber || cqIdx + 1} of {currentQ.questions?.length}
+                        </span>
+                        <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                          {cq.questionType}
+                        </span>
+                      </div>
+
+                      <div className="text-sm font-medium text-slate-100">
+                        {cq.question}
+                      </div>
+
+                      {/* Child Options (Multiple Choice or Select) */}
+                      {cq.options && (
+                        <div className="grid gap-2">
+                          {cq.options.map((opt, oIdx) => {
+                            const isMulti =
+                              cq.questionType === "Multiple Select" ||
+                              cq.questionType === "Multiple Choice (Select Two)";
+                            const isSelected = isMulti
+                              ? Array.isArray(childAns) && childAns.includes(opt)
+                              : childAns === opt;
+                            const isCorrect = isMulti
+                              ? (cq.correctAnswers || []).includes(opt)
+                              : cq.correctAnswer === opt;
+
+                            let btnStyle = "bg-slate-900 border-slate-700 text-slate-300";
+                            if (showAnswer && mode === "study") {
+                              if (isCorrect) {
+                                btnStyle = "bg-emerald-950/40 border-emerald-500 text-emerald-200";
+                              } else if (isSelected && !isCorrect) {
+                                btnStyle = "bg-rose-950/40 border-rose-500 text-rose-200";
+                              }
+                            } else if (isSelected) {
+                              btnStyle = "bg-blue-600/20 border-blue-500 text-blue-200";
+                            }
+
+                            return (
+                              <button
+                                key={oIdx}
+                                onClick={() => {
+                                  if (isMulti) {
+                                    const currentList: string[] = Array.isArray(childAns) ? childAns : [];
+                                    const nextList = currentList.includes(opt)
+                                      ? currentList.filter((x) => x !== opt)
+                                      : [...currentList, opt];
+                                    handleCaseChildAnswer(currentQ.id, cqIdx, nextList);
+                                  } else {
+                                    handleCaseChildAnswer(currentQ.id, cqIdx, opt);
+                                  }
+                                }}
+                                className={`p-3 rounded-xl border text-xs sm:text-sm text-left transition-all flex items-center gap-2.5 ${btnStyle}`}
+                              >
+                                <span className="font-bold text-slate-400">
+                                  {String.fromCharCode(65 + oIdx)}.
+                                </span>
+                                <span>{opt}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Child Hotspot / Subquestions */}
+                      {cq.subQuestions && (
+                        <div className="grid gap-3">
+                          {cq.subQuestions.map((sq, sqIdx) => {
+                            const sqVal = (childAns || {})[sqIdx.toString()] || "";
+                            const isCorrect = sqVal === sq.correctAnswer;
+                            return (
+                              <div
+                                key={sqIdx}
+                                className="p-3.5 rounded-xl bg-slate-900 border border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                              >
+                                <span className="text-xs font-semibold text-slate-200">
+                                  {sq.prompt}:
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <select
+                                    value={sqVal}
+                                    onChange={(e) => {
+                                      const nextMap = { ...(childAns || {}), [sqIdx.toString()]: e.target.value };
+                                      handleCaseChildAnswer(currentQ.id, cqIdx, nextMap);
+                                    }}
+                                    className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
+                                  >
+                                    <option value="">-- Select option --</option>
+                                    {(sq.options || []).map((opt) => (
+                                      <option key={opt} value={opt}>
+                                        {opt}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  {showAnswer && mode === "study" && (
+                                    <span
+                                      className={`text-xs px-2 py-0.5 rounded font-bold ${
+                                        isCorrect ? "text-emerald-400 bg-emerald-500/20" : "text-rose-400 bg-rose-500/20"
+                                      }`}
+                                    >
+                                      Target: {sq.correctAnswer}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {showAnswer && mode === "study" && cq.explanation && (
+                        <div className="text-xs text-slate-400 bg-slate-900/80 p-3 rounded-lg border border-slate-800 leading-relaxed">
+                          💡 {cq.explanation}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Navigation & Action Bar */}
@@ -1331,6 +1670,7 @@ export default function AZ305App() {
                 onClick={() => {
                   setCurrentIndex((prev) => Math.max(0, prev - 1));
                   setShowAnswer(false);
+                  setActiveCaseSection(0);
                 }}
                 className="px-4 py-2 rounded-xl text-sm font-medium bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
@@ -1341,6 +1681,7 @@ export default function AZ305App() {
                 onClick={() => {
                   setCurrentIndex((prev) => Math.min(activeQuestions.length - 1, prev + 1));
                   setShowAnswer(false);
+                  setActiveCaseSection(0);
                 }}
                 className="px-5 py-2 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
@@ -1418,6 +1759,7 @@ export default function AZ305App() {
                       setCurrentIndex(idx);
                       setShowPalette(false);
                       setShowAnswer(false);
+                      setActiveCaseSection(0);
                     }}
                     className={`h-11 rounded-xl text-xs font-medium border transition-all flex flex-col items-center justify-center relative ${btnStyle}`}
                   >
