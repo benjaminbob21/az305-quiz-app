@@ -1,36 +1,78 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AZ-305 Exam Simulator & Interactive Practice Question Bank
 
-## Getting Started
+Interactive exam preparation application for the **Microsoft Certified: Azure Solutions Architect Expert (AZ-305)** certification exam.
 
-First, run the development server:
+Powered by **Next.js 16**, **React 19**, **Tailwind CSS**, and **Turbopack**.
+
+---
+
+## 🚀 Features
+
+- **163 Comprehensive MeasureUp-Aligned Master Questions**:
+  - Multiple Choice
+  - Multiple Select / Multiple Choice (Select Two)
+  - Yes/No Statements & Statement Evaluation Tables
+  - Dropdown / Matching & Dropdown Hotspot
+  - Drag and Drop / Matching & Ordering
+  - Case Studies & Multi-Part Solution Evaluation Series
+- **Full Domain Coverage**:
+  - **Domain 1**: Design Business Continuity Solutions (25 questions)
+  - **Domain 2**: Design Infrastructure Solutions (54 questions)
+  - **Domain 3**: Design Data Storage Solutions (40 questions)
+  - **Domain 4**: Design Identity, Governance, and Monitoring Solutions (44 questions)
+- **Practice & Study Mode**:
+  - Instant answer validation with color-coded feedback (emerald/rose).
+  - In-depth architectural rationales and distractor analyses for every option.
+  - Direct links to official Microsoft Learn architecture documentation.
+- **Interactive Question Navigator**:
+  - Slide-in palette with direct jump to any of the 163 questions.
+  - Question flagging/bookmarking (`★`) for targeted review.
+  - Real-time progress and completion counter.
+- **Search & Filtering**:
+  - Filter by Azure certification domain.
+  - Instant text search across questions, topics, subdomains, and question numbers.
+
+---
+
+## 🛠️ Getting Started Locally
 
 ```bash
+# Install dependencies
+npm install
+
+# Run the local development server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 🌐 Deploying to Vercel
 
-## Learn More
+### Option 1: Deploy via GitHub (Recommended)
+1. Push this repository to your GitHub account:
+   ```bash
+   git remote add origin https://github.com/<your-username>/az305-quiz-app.git
+   git branch -M main
+   git push -u origin main
+   ```
+2. Navigate to [Vercel](https://vercel.com/new).
+3. Select **Import Git Repository** and choose `az305-quiz-app`.
+4. Keep standard Next.js default build settings (`next build`) and click **Deploy**.
 
-To learn more about Next.js, take a look at the following resources:
+### Option 2: Deploy directly with Vercel CLI
+```bash
+npm install -g vercel
+vercel
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 📚 Repository Structure
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `src/app/page.tsx` - Interactive quiz interface and state management.
+- `src/app/layout.tsx` - Root layout and metadata configuration.
+- `src/data/questions.json` - Complete synchronized JSON database of 163 questions.
+- `docs/az305_quiz_bank.md` - Formatted Markdown Question Bank with explanations.
+- `docs/az305_quiz_bank.json` - Standalone JSON dump of the full question set.
