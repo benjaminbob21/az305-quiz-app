@@ -3,7 +3,9 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import rawQuestions from "@/data/questions.json";
 
-// Type definitions based on questions.json schema
+// =========================================================================
+// TypeScript Interfaces aligned with questions.json schema
+// =========================================================================
 export interface SubQuestion {
   prompt?: string;
   context?: string;
@@ -20,7 +22,8 @@ export interface StatementItem {
 }
 
 export interface MappingItem {
-  component: string;
+  component?: string;
+  field?: string;
   selectedOption: string;
   options: string[];
 }
@@ -90,25 +93,144 @@ export interface Question {
   solutions?: SolutionItem[];
   sections?: CaseStudySection[];
   questions?: CaseStudyQuestion[];
+  wrongOptionsExplanation?: Record<string, string>;
+  caseStudyTitle?: string;
 }
 
-const DOMAINS = [
-  "All Domains",
-  "Design Business Continuity Solutions",
-  "Design Infrastructure Solutions",
-  "Design Data Storage Solutions",
-  "Design Identity, Governance, and Monitoring Solutions",
+// 4 Official Microsoft AZ-305 Domains
+const OBJECTIVES = [
+  "Design identity, governance, and monitoring solutions",
+  "Design data storage solutions",
+  "Design business continuity solutions",
+  "Design infrastructure solutions",
 ];
 
-// Helper to normalize domain names
+// Difficulty mapping for MeasureUp-aligned 163 questions:
+// Expert (9): Case studies, complex multi-step ordering & deep evaluation series
+const EXPERT_IDS = new Set([63, 103, 74, 79, 13, 21, 34, 50, 71]);
+// Easy Beginner (25): Fundamental single-concept questions
+const BEGINNER_IDS = new Set([
+  1, 3, 6, 9, 10, 14, 15, 18, 20, 22, 23, 26, 27, 31, 33, 35, 38, 40, 44, 47, 49, 53, 55, 58, 64,
+]);
+
+function getQuestionDifficulty(id: number): "Easy" | "Moderate" | "Expert" {
+  if (EXPERT_IDS.has(id)) return "Expert";
+  if (BEGINNER_IDS.has(id)) return "Easy";
+  return "Moderate";
+}
+
+// Normalize domain names for consistent filtering
 function normalizeDomain(domain: string): string {
-  if (domain === "Design Non-Relational Data Storage Solutions") {
-    return "Design Data Storage Solutions";
+  const d = domain.trim().toLowerCase();
+  if (d.includes("identity") || d.includes("governance") || d.includes("monitoring")) {
+    return "Design identity, governance, and monitoring solutions";
+  }
+  if (d.includes("data storage") || d.includes("non-relational")) {
+    return "Design data storage solutions";
+  }
+  if (d.includes("business continuity")) {
+    return "Design business continuity solutions";
+  }
+  if (d.includes("infrastructure")) {
+    return "Design infrastructure solutions";
   }
   return domain;
 }
 
+// =========================================================================
+// Formatted Content Component: Identifies CLI Commands, JSON & Code
+// =========================================================================
+function FormattedQuestionText({ text }: { text?: string }) {
+  if (!text) return null;
+
+  // Split on double newlines to separate paragraphs
+  const paragraphs = text
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  return (
+    <div className="space-y-4 mb-6">
+      {paragraphs.map((p, idx) => {
+        // Detect CLI Command: starts with az, Get-, Set-, New-, kubectl, docker, curl
+        const isCli = /^(az\s+[a-z]+|Get-[A-Za-z]+|Set-[A-Za-z]+|New-[A-Za-z]+|kubectl|docker|curl)/i.test(p);
+
+        // Detect JSON block: starts with [ or { and contains property quotes or braces
+        const isJson = /^[\[\{]/.test(p) && (p.includes('"') || p.includes(':'));
+
+        // Detect SQL query
+        const isSql = /^(SELECT|CREATE|ALTER|INSERT)\s+/i.test(p);
+
+        if (isCli) {
+          return (
+            <div
+              key={idx}
+              className="rounded-2xl overflow-hidden border border-slate-700/80 bg-slate-950 shadow-lg my-3"
+            >
+              <div className="flex items-center justify-between px-4 py-2 bg-slate-900 border-b border-slate-800 text-[11px] text-slate-400 font-mono">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+                  <span className="ml-2 font-semibold text-slate-300">Azure CLI Terminal</span>
+                </div>
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider font-sans font-semibold">
+                  Bash / Shell
+                </span>
+              </div>
+              <div className="p-4 overflow-x-auto text-xs font-mono text-emerald-300 flex items-start gap-2.5 bg-slate-950">
+                <span className="text-slate-500 select-none font-bold">$</span>
+                <span className="whitespace-pre-wrap">{p}</span>
+              </div>
+            </div>
+          );
+        }
+
+        if (isJson || isSql) {
+          return (
+            <div
+              key={idx}
+              className="rounded-2xl overflow-hidden border border-slate-700/80 bg-slate-950 shadow-lg my-3"
+            >
+              <div className="flex items-center justify-between px-4 py-2 bg-slate-900 border-b border-slate-800 text-[11px] text-slate-400 font-mono">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+                  <span className="ml-2 font-semibold text-slate-300">
+                    {isJson ? "output.json" : "query.sql"}
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider font-sans font-semibold">
+                  {isJson ? "JSON Payload" : "SQL / KQL"}
+                </span>
+              </div>
+              <pre className="p-4 overflow-x-auto text-xs font-mono text-sky-300 leading-relaxed bg-slate-950 max-h-80 overflow-y-auto">
+                {p}
+              </pre>
+            </div>
+          );
+        }
+
+        // Standard prose
+        return (
+          <p
+            key={idx}
+            className="text-slate-200 text-sm sm:text-base leading-relaxed font-normal"
+          >
+            {p}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+// =========================================================================
+// Main Application Component
+// =========================================================================
 export default function AZ305App() {
+  // Master Questions List
   const allQuestions = useMemo(() => {
     return (rawQuestions as unknown as Question[]).map((q) => ({
       ...q,
@@ -119,38 +241,71 @@ export default function AZ305App() {
   // Navigation View: "dashboard" | "quiz" | "results"
   const [view, setView] = useState<"dashboard" | "quiz" | "results">("dashboard");
 
-  // Dashboard Configuration Options
-  const [selectedDomain, setSelectedDomain] = useState<string>("All Domains");
-  const [mode, setMode] = useState<"study" | "exam">("study");
-  const [isRandomized, setIsRandomized] = useState<boolean>(true);
-  const [questionCount, setQuestionCount] = useState<number>(50); // Default real exam size
-  const [isTimed, setIsTimed] = useState<boolean>(true);
-  const [customTimeMinutes, setCustomTimeMinutes] = useState<number>(100); // 100 min real exam
+  // =======================================================================
+  // MeasureUp-Aligned Dashboard Configuration State
+  // =======================================================================
+  const [generalOptionsOpen, setGeneralOptionsOpen] = useState<boolean>(true);
+  const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState<boolean>(true);
 
-  // Active Session State
+  // General Options
+  const [mode, setMode] = useState<"study" | "exam">("study"); // "study" = Practice, "exam" = Certification
+  const [questionCount, setQuestionCount] = useState<number>(163);
+  const [timeLimitMode, setTimeLimitMode] = useState<"none" | "timed">("none");
+  const [customTimeMinutes, setCustomTimeMinutes] = useState<number>(100);
+
+  // Advanced Settings - Question Filters
+  const [selectedDifficulties, setSelectedDifficulties] = useState<string[]>(["Easy", "Moderate", "Expert"]);
+  const [includeFailedOnly, setIncludeFailedOnly] = useState<boolean>(false);
+  const [includeUnseenOnly, setIncludeUnseenOnly] = useState<boolean>(false);
+  const [filterByObjectives, setFilterByObjectives] = useState<boolean>(true);
+  const [selectedObjectives, setSelectedObjectives] = useState<string[]>([...OBJECTIVES]);
+
+  // Advanced Settings - Test Behavior
+  const [showAnswersAndExplanations, setShowAnswersAndExplanations] = useState<boolean>(true);
+  const [answerDisplayMode, setAnswerDisplayMode] = useState<"ask" | "immediate" | "end">("ask");
+  const [isRandomized, setIsRandomized] = useState<boolean>(true);
+
+  // Active Quiz State
   const [activeQuestions, setActiveQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [showAnswer, setShowAnswer] = useState<boolean>(false);
   const [showPalette, setShowPalette] = useState<boolean>(false);
   const [flaggedIds, setFlaggedIds] = useState<number[]>([]);
   const [userAnswers, setUserAnswers] = useState<Record<number, any>>({});
-  const [searchQuery, setSearchQuery] = useState<string>("");
-
-  // Case Study Active Tab State
   const [activeCaseSection, setActiveCaseSection] = useState<number>(0);
+  const [activeSeriesPart, setActiveSeriesPart] = useState<number>(1);
+  const [activeCaseChildIndex, setActiveCaseChildIndex] = useState<number>(0);
+  const [partShowAnswer, setPartShowAnswer] = useState<Record<string, boolean>>({});
+
+  // Reset sub-question / series pagination when switching questions
+  useEffect(() => {
+    setActiveSeriesPart(1);
+    setActiveCaseChildIndex(0);
+    setActiveCaseSection(0);
+    setShowAnswer(false);
+    setPartShowAnswer({});
+  }, [currentIndex]);
+
+  // Past Attempts Tracking (localStorage)
+  const [failedQuestionIds, setFailedQuestionIds] = useState<number[]>([]);
+  const [seenQuestionIds, setSeenQuestionIds] = useState<number[]>([]);
 
   // Timer State
-  const [timeRemaining, setTimeRemaining] = useState<number>(100 * 60);
+  const [timeRemaining, setTimeRemaining] = useState<number>(0);
   const [elapsedTime, setElapsedTime] = useState<number>(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Bookmarks persistence (localStorage)
+  // Load persistence from localStorage
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("az305_flagged_ids");
-      if (saved) {
-        setFlaggedIds(JSON.parse(saved));
-      }
+      const savedFlags = localStorage.getItem("az305_flagged_ids");
+      if (savedFlags) setFlaggedIds(JSON.parse(savedFlags));
+
+      const savedFailed = localStorage.getItem("az305_failed_ids");
+      if (savedFailed) setFailedQuestionIds(JSON.parse(savedFailed));
+
+      const savedSeen = localStorage.getItem("az305_seen_ids");
+      if (savedSeen) setSeenQuestionIds(JSON.parse(savedSeen));
     } catch {
       // ignore
     }
@@ -165,186 +320,274 @@ export default function AZ305App() {
     }
   };
 
-  // Domain statistics
-  const domainCounts = useMemo(() => {
-    const counts: Record<string, number> = {
-      "Design Business Continuity Solutions": 0,
-      "Design Infrastructure Solutions": 0,
-      "Design Data Storage Solutions": 0,
-      "Design Identity, Governance, and Monitoring Solutions": 0,
-    };
-    allQuestions.forEach((q) => {
-      if (counts[q.domain] !== undefined) {
-        counts[q.domain]++;
-      }
-    });
-    return counts;
-  }, [allQuestions]);
-
-  // Start Quiz Handler
-  const startSession = (
-    forcedMode?: "study" | "exam",
-    forcedCount?: number,
-    forcedDomain?: string,
-    forcedTimed?: boolean,
-    forcedRandom?: boolean
-  ) => {
-    const chosenMode = forcedMode ?? mode;
-    const chosenDomain = forcedDomain ?? selectedDomain;
-    const chosenRandom = forcedRandom ?? isRandomized;
-    const chosenTimed = forcedTimed ?? isTimed;
-    const chosenCount = forcedCount ?? questionCount;
-
-    let pool = allQuestions.filter((q) => {
-      if (chosenDomain === "All Domains") return true;
-      if (chosenDomain === "Flagged Only") return flaggedIds.includes(q.id);
-      return q.domain === chosenDomain;
-    });
-
-    if (pool.length === 0) {
-      alert("No questions available for this selection! If using Flagged Only, flag some questions first.");
-      return;
-    }
-
-    if (chosenRandom) {
-      pool = [...pool].sort(() => Math.random() - 0.5);
-    }
-
-    const finalQuestions = pool.slice(0, Math.min(chosenCount, pool.length));
-
-    setActiveQuestions(finalQuestions);
-    setCurrentIndex(0);
-    setUserAnswers({});
-    setShowAnswer(false);
-    setShowPalette(false);
-    setSearchQuery("");
-    setMode(chosenMode);
-    setActiveCaseSection(0);
-
-    // Setup Timer
-    const durationSeconds = customTimeMinutes * 60;
-    setTimeRemaining(durationSeconds);
-    setElapsedTime(0);
-
-    setView("quiz");
-  };
-
-  // Timer Tick Hook
-  useEffect(() => {
-    if (view === "quiz") {
-      timerRef.current = setInterval(() => {
-        setElapsedTime((prev) => prev + 1);
-        if (isTimed) {
-          setTimeRemaining((prev) => {
-            if (prev <= 1) {
-              clearInterval(timerRef.current!);
-              alert("Time has expired! Submitting your exam session now.");
-              setView("results");
-              return 0;
-            }
-            return prev - 1;
-          });
-        }
-      }, 1000);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [view, isTimed]);
-
-  // Current Active Question
-  const currentQ: Question | undefined = activeQuestions[currentIndex];
-
-  const toggleFlag = (id: number) => {
+  const toggleBookmark = (id: number) => {
     const updated = flaggedIds.includes(id)
-      ? flaggedIds.filter((item) => item !== id)
+      ? flaggedIds.filter((x) => x !== id)
       : [...flaggedIds, id];
     saveFlags(updated);
   };
 
-  const handleSelectOption = (qid: number, option: string) => {
-    setUserAnswers((prev) => ({
-      ...prev,
-      [qid]: option,
-    }));
-  };
+  // Timer Effect
+  useEffect(() => {
+    if (view !== "quiz") {
+      if (timerRef.current) clearInterval(timerRef.current);
+      return;
+    }
 
-  const handleToggleMultiOption = (qid: number, option: string) => {
-    setUserAnswers((prev) => {
-      const currentList: string[] = prev[qid] || [];
-      if (currentList.includes(option)) {
-        return { ...prev, [qid]: currentList.filter((o) => o !== option) };
-      } else {
-        return { ...prev, [qid]: [...currentList, option] };
+    timerRef.current = setInterval(() => {
+      setElapsedTime((prev) => prev + 1);
+
+      if (timeLimitMode === "timed") {
+        setTimeRemaining((prev) => {
+          if (prev <= 1) {
+            clearInterval(timerRef.current!);
+            setView("results");
+            return 0;
+          }
+          return prev - 1;
+        });
       }
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [view, timeLimitMode]);
+
+  // Current Question
+  const currentQ = activeQuestions[currentIndex];
+  const currentAnswer = currentQ ? userAnswers[currentQ.id] : undefined;
+
+  // Record question as seen
+  useEffect(() => {
+    if (currentQ && !seenQuestionIds.includes(currentQ.id)) {
+      const updated = [...seenQuestionIds, currentQ.id];
+      setSeenQuestionIds(updated);
+      try {
+        localStorage.setItem("az305_seen_ids", JSON.stringify(updated));
+      } catch {
+        // ignore
+      }
+    }
+  }, [currentQ, seenQuestionIds]);
+
+  // Objective Question Counts
+  const objectiveCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      "Design identity, governance, and monitoring solutions": 0,
+      "Design data storage solutions": 0,
+      "Design business continuity solutions": 0,
+      "Design infrastructure solutions": 0,
+    };
+    allQuestions.forEach((q) => {
+      if (counts[q.domain] !== undefined) counts[q.domain]++;
     });
+    return counts;
+  }, [allQuestions]);
+
+  // Difficulty Counts
+  const difficultyCounts = useMemo(() => {
+    let easy = 0,
+      moderate = 0,
+      expert = 0;
+    allQuestions.forEach((q) => {
+      const diff = getQuestionDifficulty(q.id);
+      if (diff === "Easy") easy++;
+      else if (diff === "Moderate") moderate++;
+      else expert++;
+    });
+    return { easy, moderate, expert };
+  }, [allQuestions]);
+
+  // Dynamically calculate questions available based on active domain & filter selections
+  const availablePoolCount = useMemo(() => {
+    let pool = [...allQuestions];
+    if (selectedDifficulties.length > 0 && selectedDifficulties.length < 3) {
+      pool = pool.filter((q) => selectedDifficulties.includes(getQuestionDifficulty(q.id)));
+    }
+    if (filterByObjectives && selectedObjectives.length > 0) {
+      pool = pool.filter((q) => selectedObjectives.includes(q.domain));
+    }
+    if (includeFailedOnly && failedQuestionIds.length > 0) {
+      pool = pool.filter((q) => failedQuestionIds.includes(q.id));
+    }
+    if (includeUnseenOnly) {
+      const unseen = pool.filter((q) => !seenQuestionIds.includes(q.id));
+      if (unseen.length > 0) pool = unseen;
+    }
+    return pool.length;
+  }, [
+    allQuestions,
+    selectedDifficulties,
+    filterByObjectives,
+    selectedObjectives,
+    includeFailedOnly,
+    failedQuestionIds,
+    includeUnseenOnly,
+    seenQuestionIds,
+  ]);
+
+  // Dynamic question count presets based on filtered pool size
+  const countPresets = useMemo(() => {
+    if (availablePoolCount <= 15) return [availablePoolCount];
+    if (availablePoolCount <= 30) return [15, availablePoolCount];
+    if (availablePoolCount <= 50) return [15, 30, availablePoolCount];
+    return [15, 30, 50, availablePoolCount];
+  }, [availablePoolCount]);
+
+  // Ensure questionCount never exceeds availablePoolCount
+  useEffect(() => {
+    if (questionCount > availablePoolCount) {
+      setQuestionCount(Math.max(1, availablePoolCount));
+    }
+  }, [availablePoolCount, questionCount]);
+
+  // Handle Objective Toggle
+  const toggleObjective = (obj: string) => {
+    if (selectedObjectives.includes(obj)) {
+      if (selectedObjectives.length > 1) {
+        setSelectedObjectives(selectedObjectives.filter((o) => o !== obj));
+      }
+    } else {
+      setSelectedObjectives([...selectedObjectives, obj]);
+    }
   };
 
-  const handleStatementAnswer = (qid: number, statementIdx: number, val: "Yes" | "No") => {
+  // Handle Difficulty Toggle
+  const toggleDifficulty = (diff: "Easy" | "Moderate" | "Expert") => {
+    if (selectedDifficulties.includes(diff)) {
+      if (selectedDifficulties.length > 1) {
+        setSelectedDifficulties(selectedDifficulties.filter((d) => d !== diff));
+      }
+    } else {
+      setSelectedDifficulties([...selectedDifficulties, diff]);
+    }
+  };
+
+  // Launch Session
+  const startSession = () => {
+    let pool = [...allQuestions];
+
+    // Filter by difficulty
+    if (selectedDifficulties.length > 0 && selectedDifficulties.length < 3) {
+      pool = pool.filter((q) => selectedDifficulties.includes(getQuestionDifficulty(q.id)));
+    }
+
+    // Filter by objectives
+    if (filterByObjectives && selectedObjectives.length > 0) {
+      pool = pool.filter((q) => selectedObjectives.includes(q.domain));
+    }
+
+    // Filter by failed
+    if (includeFailedOnly && failedQuestionIds.length > 0) {
+      pool = pool.filter((q) => failedQuestionIds.includes(q.id));
+    }
+
+    // Filter by unseen
+    if (includeUnseenOnly) {
+      const unseen = pool.filter((q) => !seenQuestionIds.includes(q.id));
+      if (unseen.length > 0) pool = unseen;
+    }
+
+    // Fallback if empty
+    if (pool.length === 0) pool = [...allQuestions];
+
+    // Randomize
+    if (isRandomized) {
+      pool.sort(() => Math.random() - 0.5);
+    }
+
+    // Slice count
+    const count = Math.min(Math.max(1, questionCount), pool.length);
+    const selected = pool.slice(0, count);
+
+    setActiveQuestions(selected);
+    setCurrentIndex(0);
+    setUserAnswers({});
+    setShowAnswer(false);
+    setElapsedTime(0);
+
+    if (timeLimitMode === "timed") {
+      setTimeRemaining(customTimeMinutes * 60);
+    } else {
+      setTimeRemaining(0);
+    }
+
+    setView("quiz");
+  };
+
+  // Check Answer & Rationale Trigger
+  const handleCheckAnswer = () => {
+    setShowAnswer(true);
+  };
+
+  // Handle Answer Selection
+  const handleSelectOption = (qId: number, option: string) => {
+    setUserAnswers((prev) => ({ ...prev, [qId]: option }));
+    if (mode === "study" && showAnswersAndExplanations && answerDisplayMode === "immediate") {
+      setShowAnswer(true);
+    }
+  };
+
+  const handleToggleMultiOption = (qId: number, option: string) => {
     setUserAnswers((prev) => {
-      const currentMap = prev[qid] || {};
-      return {
-        ...prev,
-        [qid]: {
-          ...currentMap,
-          [statementIdx]: val,
-        },
-      };
+      const currentList: string[] = prev[qId] || [];
+      const updated = currentList.includes(option)
+        ? currentList.filter((item) => item !== option)
+        : [...currentList, option];
+      return { ...prev, [qId]: updated };
     });
+    if (mode === "study" && showAnswersAndExplanations && answerDisplayMode === "immediate") {
+      setShowAnswer(true);
+    }
   };
 
-  const handleDropdownSelect = (qid: number, key: string, val: string) => {
+  const handleStatementAnswer = (qId: number, statementIdx: number, val: "Yes" | "No") => {
     setUserAnswers((prev) => {
-      const currentMap = prev[qid] || {};
-      return {
-        ...prev,
-        [qid]: {
-          ...currentMap,
-          [key]: val,
-        },
-      };
+      const currentMap = prev[qId] || {};
+      return { ...prev, [qId]: { ...currentMap, [statementIdx]: val } };
     });
   };
 
-  const handleCaseChildAnswer = (qid: number, childIdx: number, val: any) => {
+  const handleDropdownSelect = (qId: number, key: string, val: string) => {
     setUserAnswers((prev) => {
-      const currentMap = prev[qid] || {};
-      return {
-        ...prev,
-        [qid]: {
-          ...currentMap,
-          [childIdx]: val,
-        },
-      };
+      const currentMap = prev[qId] || {};
+      return { ...prev, [qId]: { ...currentMap, [key]: val } };
     });
   };
 
-  // Evaluation algorithm for calculating scores accurately
+  const handleCaseChildAnswer = (qId: number, childIdx: number, val: any) => {
+    setUserAnswers((prev) => {
+      const currentMap = prev[qId] || {};
+      return { ...prev, [qId]: { ...currentMap, [childIdx]: val } };
+    });
+  };
+
+  // Comprehensive Question Evaluation Logic
   const evaluateQuestion = (q: Question, ans: any): boolean => {
     if (!ans) return false;
 
-    // Multiple Choice
+    // 1. Multiple Choice
     if (q.questionType === "Multiple Choice") {
       return ans === q.correctAnswer;
     }
 
-    // Multiple Select / Select Two
+    // 2. Multiple Select / Multiple Choice (Select Two)
     if (
       q.questionType === "Multiple Select" ||
       q.questionType === "Multiple Choice (Select Two)"
     ) {
-      if (!Array.isArray(ans)) return false;
-      const expected = Array.isArray(q.correctAnswer)
+      const correctList: string[] = Array.isArray(q.correctAnswer)
         ? q.correctAnswer
         : q.correctAnswers || [q.correctAnswer || ""];
-      if (ans.length !== expected.length) return false;
-      return expected.every((val) => ans.includes(val));
+      if (!Array.isArray(ans)) return false;
+      return (
+        ans.length === correctList.length &&
+        ans.every((item) => correctList.includes(item))
+      );
     }
 
-    // Yes/No Statements
+    // 3. Statements Table
     if (
       (q.questionType === "Yes/No Statements Table" ||
         q.questionType === "Yes/No Statements") &&
@@ -353,7 +596,7 @@ export default function AZ305App() {
       return q.statements.every((s, idx) => ans[idx] === s.correctAnswer);
     }
 
-    // Dropdown / Hotspot or Matching with subQuestions (e.g. Q2, Q4, Q12, Q30, Q36)
+    // 4. Dropdown Hotspot with subQuestions
     if (q.subQuestions && q.subQuestions.length > 0) {
       return q.subQuestions.every((sq, idx) => {
         const userChoice = ans[idx.toString()] || ans[sq.prompt || ""];
@@ -361,23 +604,26 @@ export default function AZ305App() {
       });
     }
 
-    // Dropdown Matching
+    // 5. Dropdown Matching (handles both component and field keys)
     if (q.questionType === "Dropdown / Matching" && q.mapping) {
-      return q.mapping.every((m) => ans[m.component] === m.selectedOption);
+      return q.mapping.every((m) => {
+        const key = m.component || m.field || "";
+        return ans[key] === m.selectedOption;
+      });
     }
 
-    // Drag and drop pairs
+    // 6. Drag and Drop Matching pairs
     if (q.questionType === "Drag and Drop / Matching" && q.pairs) {
       return q.pairs.every((p) => ans[p.requirement] === p.answer);
     }
 
-    // Drag and drop ordering
+    // 7. Drag and Drop Ordering
     if (q.questionType === "Drag and Drop / Ordering") {
       const order = q.correctOrder || q.correctPipeline || [];
       return order.every((val, idx) => ans[idx.toString()] === val);
     }
 
-    // Solution Evaluation series
+    // 8. Solution Evaluation Series
     if (
       q.questionType === "Case Study / Solution Evaluation Series" &&
       q.solutions
@@ -385,7 +631,7 @@ export default function AZ305App() {
       return q.solutions.every((sol) => ans[sol.part.toString()] === sol.correctAnswer);
     }
 
-    // Case Study with child questions
+    // 9. Case Study with child questions
     if (q.questionType === "Case Study" && q.questions) {
       return q.questions.every((cq, idx) => {
         const cAns = ans[idx];
@@ -396,6 +642,11 @@ export default function AZ305App() {
             cq.correctAnswers.every((a) => cAns.includes(a))
           );
         }
+        if (cq.subQuestions && typeof cAns === "object") {
+          return cq.subQuestions.every(
+            (sq, sqIdx) => cAns[sqIdx.toString()] === sq.correctAnswer
+          );
+        }
         return cAns === cq.correctAnswer;
       });
     }
@@ -403,17 +654,22 @@ export default function AZ305App() {
     return false;
   };
 
-  // Results calculation
+  // Results Calculation
   const resultsData = useMemo(() => {
     let correctCount = 0;
     const domainBreakdown: Record<
       string,
       { total: number; correct: number; questions: Question[] }
     > = {};
+    const failedIds: number[] = [];
 
     activeQuestions.forEach((q) => {
       const isCorrect = evaluateQuestion(q, userAnswers[q.id]);
-      if (isCorrect) correctCount++;
+      if (isCorrect) {
+        correctCount++;
+      } else {
+        failedIds.push(q.id);
+      }
 
       if (!domainBreakdown[q.domain]) {
         domainBreakdown[q.domain] = { total: 0, correct: 0, questions: [] };
@@ -425,7 +681,7 @@ export default function AZ305App() {
 
     const total = activeQuestions.length;
     const percent = total > 0 ? Math.round((correctCount / total) * 100) : 0;
-    const scaledScore = Math.round(percent * 10); // Real MS exam scale out of 1000, passing 700
+    const scaledScore = Math.round(percent * 10);
 
     return {
       total,
@@ -435,33 +691,46 @@ export default function AZ305App() {
       scaledScore,
       isPassed: scaledScore >= 700,
       domainBreakdown,
+      failedIds,
     };
   }, [activeQuestions, userAnswers]);
 
-  // Format seconds into MM:SS
+  // Persist failed question IDs when viewing results
+  useEffect(() => {
+    if (view === "results" && resultsData.failedIds.length > 0) {
+      const merged = Array.from(new Set([...failedQuestionIds, ...resultsData.failedIds]));
+      setFailedQuestionIds(merged);
+      try {
+        localStorage.setItem("az305_failed_ids", JSON.stringify(merged));
+      } catch {
+        // ignore
+      }
+    }
+  }, [view, resultsData.failedIds]);
+
   const formatTime = (secs: number) => {
     const mins = Math.floor(secs / 60);
     const remainder = secs % 60;
     return `${mins.toString().padStart(2, "0")}:${remainder.toString().padStart(2, "0")}`;
   };
 
-  // ==========================================
-  // VIEW 1: DASHBOARD / CONFIGURATION HUB
-  // ==========================================
+  // =======================================================================
+  // VIEW 1: DASHBOARD / MEASUREUP SETUP HUB
+  // =======================================================================
   if (view === "dashboard") {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
         {/* Top Header */}
-        <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-md px-6 py-4 sticky top-0 z-20">
-          <div className="max-w-6xl mx-auto flex items-center justify-between">
-            <div className="flex items-center gap-3.5">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center font-black text-white text-xl shadow-lg shadow-blue-500/20">
+        <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur-md px-6 py-4 sticky top-0 z-20 shadow-md">
+          <div className="max-w-4xl mx-auto flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center font-black text-white text-base shadow-md shadow-blue-500/20">
                 AZ
               </div>
               <div>
-                <h1 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+                <h1 className="text-base sm:text-lg font-bold tracking-tight text-white flex items-center gap-2">
                   AZ-305 Exam Practice Hub
-                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold">
+                  <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/30 font-semibold">
                     163 Questions Synced
                   </span>
                 </h1>
@@ -479,271 +748,415 @@ export default function AZ305App() {
           </div>
         </header>
 
-        {/* Dashboard Main Content */}
-        <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col gap-8">
-          {/* Hero Banner with Quick Start Presets */}
-          <div className="rounded-3xl bg-gradient-to-br from-blue-900/40 via-slate-900 to-slate-900 border border-blue-500/20 p-6 sm:p-8 relative overflow-hidden shadow-2xl">
-            <div className="relative z-10 max-w-2xl">
-              <span className="inline-block px-3 py-1 rounded-full bg-blue-500/20 border border-blue-500/30 text-blue-300 font-bold text-xs uppercase tracking-wider mb-3">
-                Certification Simulation Engine
-              </span>
-              <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight mb-2">
-                Configure Your AZ-305 Session
-              </h2>
-              <p className="text-sm text-slate-300 leading-relaxed mb-6">
-                Choose between instant-feedback <strong>Study Mode</strong> with detailed architectural rationales, or realistic <strong>Certification Exam Mode</strong> with timed conditions and post-exam score reports.
-              </p>
-
-              {/* Quick Launch Buttons */}
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  onClick={() => startSession("exam", 50, "All Domains", true, true)}
-                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm shadow-lg shadow-blue-600/30 transition-all flex items-center gap-2"
-                >
-                  <span>⚡ Quick Exam (50 Qs • 100m)</span>
-                </button>
-                <button
-                  onClick={() => startSession("study", 20, "All Domains", false, true)}
-                  className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-sm transition-all flex items-center gap-2"
-                >
-                  <span>📖 Practice 20 Random Qs</span>
-                </button>
-                {flaggedIds.length > 0 && (
-                  <button
-                    onClick={() => startSession("study", flaggedIds.length, "Flagged Only", false, false)}
-                    className="px-4 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold text-sm transition-all"
-                  >
-                    ★ Review Bookmarks ({flaggedIds.length})
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Custom Session Configuration Matrix */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Step 1: Mode & Domain Selection */}
-            <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-7 flex flex-col gap-6 shadow-xl">
-              <div>
-                <h3 className="text-base font-bold text-white flex items-center gap-2 mb-1">
-                  <span className="w-6 h-6 rounded-lg bg-blue-600/30 text-blue-400 flex items-center justify-center text-xs">
-                    1
-                  </span>
-                  Choose Practice Mode
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Select how feedback and answers should be presented.
-                </p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-                  <button
-                    onClick={() => setMode("study")}
-                    className={`p-4 rounded-2xl border text-left transition-all ${
-                      mode === "study"
-                        ? "bg-blue-600/20 border-blue-500 text-white shadow-md shadow-blue-500/10"
-                        : "bg-slate-850 border-slate-800 text-slate-400 hover:border-slate-700"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-bold text-sm text-slate-200">Study / Practice Mode</span>
-                      {mode === "study" && <span className="text-blue-400 text-xs font-bold">● Active</span>}
-                    </div>
-                    <p className="text-xs text-slate-400 leading-normal">
-                      Includes the <strong>"Check Answer"</strong> button on every question with instant architectural explanations and Microsoft Learn references.
-                    </p>
-                  </button>
-
-                  <button
-                    onClick={() => setMode("exam")}
-                    className={`p-4 rounded-2xl border text-left transition-all ${
-                      mode === "exam"
-                        ? "bg-blue-600/20 border-blue-500 text-white shadow-md shadow-blue-500/10"
-                        : "bg-slate-850 border-slate-800 text-slate-400 hover:border-slate-700"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-bold text-sm text-slate-200">Certification Exam Mode</span>
-                      {mode === "exam" && <span className="text-blue-400 text-xs font-bold">● Active</span>}
-                    </div>
-                    <p className="text-xs text-slate-400 leading-normal">
-                      <strong>Answers are hidden</strong> during the test. Full timed experience with scaled 1000-point score report upon completion.
-                    </p>
-                  </button>
+        {/* Setup Container matching MeasureUp Interface */}
+        <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col gap-6">
+          {/* Card Container */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden divide-y divide-slate-800">
+            {/* ========================================================= */}
+            {/* SECTION 1: GENERAL OPTIONS                                */}
+            {/* ========================================================= */}
+            <div className="p-6">
+              {/* Accordion Header */}
+              <button
+                onClick={() => setGeneralOptionsOpen(!generalOptionsOpen)}
+                className="w-full flex items-center justify-between text-left group"
+              >
+                <div className="flex items-center gap-2.5 text-blue-400 font-bold text-lg">
+                  <span className="text-xl">⚙️</span>
+                  <span>General Options</span>
                 </div>
-              </div>
+                <span className="text-slate-400 text-lg group-hover:text-white transition-colors">
+                  {generalOptionsOpen ? "▲" : "▼"}
+                </span>
+              </button>
 
-              {/* Scope / Domain Filter */}
-              <div>
-                <h3 className="text-base font-bold text-white flex items-center gap-2 mb-1">
-                  <span className="w-6 h-6 rounded-lg bg-blue-600/30 text-blue-400 flex items-center justify-center text-xs">
-                    2
-                  </span>
-                  Select Exam Domain Focus
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Target a specific skill domain or practice across all four.
-                </p>
+              {generalOptionsOpen && (
+                <div className="mt-6 flex flex-col gap-6">
+                  {/* Test Mode */}
+                  <div>
+                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-300 mb-3">
+                      <span>🎚️ Test Mode</span>
+                      <span className="text-slate-500 cursor-pointer" title="Select between flexible study mode or strict exam conditions">
+                        ⓘ
+                      </span>
+                    </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-3">
-                  {DOMAINS.map((dom) => {
-                    const isSelected = selectedDomain === dom;
-                    const count =
-                      dom === "All Domains"
-                        ? allQuestions.length
-                        : domainCounts[dom] || 0;
-
-                    return (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Practice Card */}
                       <button
-                        key={dom}
-                        onClick={() => setSelectedDomain(dom)}
-                        className={`p-3 rounded-xl border text-left text-xs transition-all flex items-center justify-between ${
-                          isSelected
-                            ? "bg-blue-600/20 border-blue-500 text-white font-semibold"
-                            : "bg-slate-850 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300"
+                        onClick={() => setMode("study")}
+                        className={`p-5 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-2 ${
+                          mode === "study"
+                            ? "bg-blue-600/15 border-blue-500 text-white shadow-md shadow-blue-500/10 ring-1 ring-blue-500"
+                            : "bg-slate-850 border-slate-800 text-slate-400 hover:border-slate-700"
                         }`}
                       >
-                        <span className="truncate pr-2">{dom}</span>
-                        <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 font-mono text-[11px] shrink-0">
-                          {count}
+                        <span className="text-2xl">🎓</span>
+                        <span className="font-bold text-sm text-blue-400">Practice</span>
+                        <span className="text-xs text-slate-400">
+                          Study mode, with feedback, flexible
                         </span>
                       </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
 
-            {/* Step 2: Session Parameters & Timer */}
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-7 flex flex-col justify-between gap-6 shadow-xl">
-              <div className="flex flex-col gap-5">
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-lg bg-blue-600/30 text-blue-400 flex items-center justify-center text-xs">
-                    3
-                  </span>
-                  Session Parameters
-                </h3>
-
-                {/* Question Count Selection */}
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 flex items-center justify-between mb-2">
-                    <span>Number of Questions</span>
-                    <span className="text-blue-400 font-bold font-mono">{questionCount}</span>
-                  </label>
-                  <div className="grid grid-cols-4 gap-2">
-                    {[15, 30, 50, allQuestions.length].map((num) => (
+                      {/* Certification Card */}
                       <button
-                        key={num}
-                        onClick={() => setQuestionCount(num)}
-                        className={`py-2 rounded-xl text-xs font-bold border transition-colors ${
-                          questionCount === num
-                            ? "bg-blue-600 border-blue-500 text-white"
-                            : "bg-slate-850 border-slate-800 text-slate-400 hover:bg-slate-800"
+                        onClick={() => setMode("exam")}
+                        className={`p-5 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-2 ${
+                          mode === "exam"
+                            ? "bg-emerald-600/15 border-emerald-500 text-white shadow-md shadow-emerald-500/10 ring-1 ring-emerald-500"
+                            : "bg-slate-850 border-slate-800 text-slate-400 hover:border-slate-700"
                         }`}
                       >
-                        {num === allQuestions.length ? "All 163" : num}
+                        <span className="text-2xl">🛡️</span>
+                        <span className="font-bold text-sm text-emerald-400">Certification</span>
+                        <span className="text-xs text-slate-400">
+                          Strict, no feedback, real conditions
+                        </span>
                       </button>
-                    ))}
+                    </div>
                   </div>
-                </div>
 
-                {/* Randomize Toggle */}
-                <div className="p-3.5 rounded-2xl bg-slate-850 border border-slate-800 flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-bold text-slate-200 block">Randomize Question Order</span>
-                    <span className="text-[11px] text-slate-500">Shuffles questions across domains</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={isRandomized}
-                    onChange={(e) => setIsRandomized(e.target.checked)}
-                    className="w-5 h-5 accent-blue-600 rounded cursor-pointer"
-                  />
-                </div>
-
-                {/* Timed Mode Toggle */}
-                <div className="p-3.5 rounded-2xl bg-slate-850 border border-slate-800 flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
+                  {/* Number of Questions & Time Limit */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
+                    {/* Number of Questions */}
                     <div>
-                      <span className="text-xs font-bold text-slate-200 block">Timed Exam Mode</span>
-                      <span className="text-[11px] text-slate-500">Enable countdown timer</span>
+                      <div className="flex items-center gap-2 text-xs font-semibold text-slate-300 mb-2">
+                        <span>📄 Number of Questions</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="number"
+                          min={1}
+                          max={availablePoolCount}
+                          value={Math.min(questionCount, availablePoolCount)}
+                          onChange={(e) =>
+                            setQuestionCount(
+                              Math.min(
+                                availablePoolCount,
+                                Math.max(1, parseInt(e.target.value) || 1)
+                              )
+                            )
+                          }
+                          className="w-24 bg-slate-850 border border-slate-700 rounded-xl px-3 py-2 text-center text-sm font-bold text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <span className="text-xs text-slate-400">
+                          of {availablePoolCount} available in selection
+                        </span>
+                      </div>
+
+                      {/* Quick Presets */}
+                      <div className="flex flex-wrap items-center gap-2 mt-2.5">
+                        {countPresets.map((n) => (
+                          <button
+                            key={n}
+                            onClick={() => setQuestionCount(n)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                              questionCount === n
+                                ? "bg-blue-600 border-blue-500 text-white"
+                                : "bg-slate-850 border-slate-800 text-slate-400 hover:bg-slate-800"
+                            }`}
+                          >
+                            {n === availablePoolCount ? `All ${n}` : n}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                    <input
-                      type="checkbox"
-                      checked={isTimed}
-                      onChange={(e) => setIsTimed(e.target.checked)}
-                      className="w-5 h-5 accent-blue-600 rounded cursor-pointer"
-                    />
+
+                    {/* Time Limit */}
+                    <div>
+                      <div className="flex items-center gap-2 text-xs font-semibold text-slate-300 mb-2">
+                        <span>🕒 Time Limit</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setTimeLimitMode("none")}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
+                            timeLimitMode === "none"
+                              ? "bg-blue-600/20 border-blue-500 text-blue-300 ring-1 ring-blue-500"
+                              : "bg-slate-850 border-slate-800 text-slate-400 hover:bg-slate-800"
+                          }`}
+                        >
+                          No time limit
+                        </button>
+                        <button
+                          onClick={() => setTimeLimitMode("timed")}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
+                            timeLimitMode === "timed"
+                              ? "bg-blue-600/20 border-blue-500 text-blue-300 ring-1 ring-blue-500"
+                              : "bg-slate-850 border-slate-800 text-slate-400 hover:bg-slate-800"
+                          }`}
+                        >
+                          Set time limit
+                        </button>
+                      </div>
+
+                      {timeLimitMode === "timed" && (
+                        <div className="mt-3 flex items-center gap-2 text-xs text-slate-300">
+                          <span>Duration:</span>
+                          <select
+                            value={customTimeMinutes}
+                            onChange={(e) => setCustomTimeMinutes(Number(e.target.value))}
+                            className="bg-slate-850 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                          >
+                            <option value={30}>30 Minutes</option>
+                            <option value={60}>60 Minutes</option>
+                            <option value={100}>100 Minutes (Real Exam)</option>
+                            <option value={120}>120 Minutes</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ========================================================= */}
+            {/* SECTION 2: ADVANCED SETTINGS                              */}
+            {/* ========================================================= */}
+            <div className="p-6">
+              {/* Accordion Header */}
+              <button
+                onClick={() => setAdvancedSettingsOpen(!advancedSettingsOpen)}
+                className="w-full flex items-center justify-between text-left group"
+              >
+                <div className="flex items-center gap-2.5 text-blue-400 font-bold text-lg">
+                  <span className="text-xl">🧪</span>
+                  <span>Advanced Settings</span>
+                </div>
+                <span className="text-slate-400 text-lg group-hover:text-white transition-colors">
+                  {advancedSettingsOpen ? "▲" : "▼"}
+                </span>
+              </button>
+
+              {advancedSettingsOpen && (
+                <div className="mt-6 flex flex-col gap-6">
+                  {/* Subsection: Question Filters */}
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
+                        <span>🎛️ Question Filters</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setSelectedDifficulties(["Easy", "Moderate", "Expert"]);
+                          setIncludeFailedOnly(false);
+                          setIncludeUnseenOnly(false);
+                          setFilterByObjectives(true);
+                          setSelectedObjectives([...OBJECTIVES]);
+                        }}
+                        className="text-xs text-slate-400 hover:text-blue-400 flex items-center gap-1 transition-colors"
+                        title="Reset filters to default"
+                      >
+                        <span>↺</span> Reset Filters
+                      </button>
+                    </div>
+
+                    {/* Difficulty Selection */}
+                    <div className="mb-4">
+                      <div className="text-xs text-slate-400 flex items-center gap-1.5 mb-2">
+                        <span>📶 Difficulty</span>
+                        <span className="text-slate-500 cursor-pointer" title="Filter by question difficulty level">
+                          ⓘ
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <button
+                          onClick={() => toggleDifficulty("Easy")}
+                          className={`p-3 rounded-xl border text-left text-xs transition-all flex items-center justify-between ${
+                            selectedDifficulties.includes("Easy")
+                              ? "bg-blue-600/20 border-blue-500 text-white font-semibold"
+                              : "bg-slate-850 border-slate-800 text-slate-400 hover:border-slate-700"
+                          }`}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <span className="text-emerald-400">↓</span> Easy Beginner
+                          </span>
+                          <span className="px-2 py-0.5 rounded-md bg-slate-800 font-mono text-[11px] text-slate-300">
+                            {difficultyCounts.easy}
+                          </span>
+                        </button>
+
+                        <button
+                          onClick={() => toggleDifficulty("Moderate")}
+                          className={`p-3 rounded-xl border text-left text-xs transition-all flex items-center justify-between ${
+                            selectedDifficulties.includes("Moderate")
+                              ? "bg-blue-600/20 border-blue-500 text-white font-semibold"
+                              : "bg-slate-850 border-slate-800 text-slate-400 hover:border-slate-700"
+                          }`}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <span className="text-amber-400">→</span> Moderate
+                          </span>
+                          <span className="px-2 py-0.5 rounded-md bg-slate-800 font-mono text-[11px] text-slate-300">
+                            {difficultyCounts.moderate}
+                          </span>
+                        </button>
+
+                        <button
+                          onClick={() => toggleDifficulty("Expert")}
+                          className={`p-3 rounded-xl border text-left text-xs transition-all flex items-center justify-between ${
+                            selectedDifficulties.includes("Expert")
+                              ? "bg-blue-600/20 border-blue-500 text-white font-semibold"
+                              : "bg-slate-850 border-slate-800 text-slate-400 hover:border-slate-700"
+                          }`}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <span className="text-rose-400">↗</span> Expert
+                          </span>
+                          <span className="px-2 py-0.5 rounded-md bg-slate-800 font-mono text-[11px] text-slate-300">
+                            {difficultyCounts.expert}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Checkboxes: Past Attempts */}
+                    <div className="flex flex-col gap-2.5 mb-4">
+                      <label className="flex items-center gap-2.5 cursor-pointer text-xs text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={includeFailedOnly}
+                          onChange={(e) => setIncludeFailedOnly(e.target.checked)}
+                          className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
+                        />
+                        <span>Include failed questions from last attempts</span>
+                        <span className="text-slate-500" title="Focus exclusively on questions answered incorrectly in previous sessions">
+                          ⓘ ({failedQuestionIds.length} recorded)
+                        </span>
+                      </label>
+
+                      <label className="flex items-center gap-2.5 cursor-pointer text-xs text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={includeUnseenOnly}
+                          onChange={(e) => setIncludeUnseenOnly(e.target.checked)}
+                          className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
+                        />
+                        <span>Include unseen/not displayed questions from last attempts</span>
+                        <span className="text-slate-500" title="Prioritize fresh questions you have not yet encountered">
+                          ⓘ ({allQuestions.length - seenQuestionIds.length} unseen)
+                        </span>
+                      </label>
+                    </div>
+
+                    {/* Objectives Selection */}
+                    <div>
+                      <label className="flex items-center gap-2.5 cursor-pointer text-xs font-semibold text-slate-300 mb-3">
+                        <input
+                          type="checkbox"
+                          checked={filterByObjectives}
+                          onChange={(e) => setFilterByObjectives(e.target.checked)}
+                          className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
+                        />
+                        <span>Select questions from specific objectives</span>
+                        <span className="text-slate-500" title="Target specific exam syllabus domains">
+                          ⓘ
+                        </span>
+                      </label>
+
+                      {filterByObjectives && (
+                        <div className="grid grid-cols-1 gap-2 pl-6">
+                          {OBJECTIVES.map((obj) => {
+                            const isSelected = selectedObjectives.includes(obj);
+                            const count = objectiveCounts[obj] || 0;
+
+                            return (
+                              <button
+                                key={obj}
+                                onClick={() => toggleObjective(obj)}
+                                className={`p-3 rounded-xl border text-left text-xs transition-all flex items-center justify-between ${
+                                  isSelected
+                                    ? "bg-blue-600/15 border-blue-500 text-white font-medium"
+                                    : "bg-slate-850 border-slate-800 text-slate-400 hover:border-slate-700"
+                                }`}
+                              >
+                                <span className="flex items-center gap-2">
+                                  <span>🏷️</span>
+                                  <span className="capitalize">{obj}</span>
+                                </span>
+                                <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 font-mono text-[11px]">
+                                  {count}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  {isTimed && (
-                    <div className="flex items-center gap-2 pt-2 border-t border-slate-800 text-xs text-slate-400">
-                      <span>Suggested Time:</span>
-                      <select
-                        value={customTimeMinutes}
-                        onChange={(e) => setCustomTimeMinutes(Number(e.target.value))}
-                        className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 font-mono text-xs focus:ring-1 focus:ring-blue-500"
-                      >
-                        <option value={30}>30 Minutes</option>
-                        <option value={60}>60 Minutes</option>
-                        <option value={100}>100 Minutes (Real Exam)</option>
-                        <option value={120}>120 Minutes</option>
-                      </select>
+                  {/* Subsection: Test Behavior */}
+                  <div className="pt-4 border-t border-slate-800">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-300 mb-3">
+                      <span>⚙️ Test Behavior</span>
                     </div>
-                  )}
-                </div>
-              </div>
 
-              {/* Start Session CTA */}
+                    {/* Show correct answers and explanations */}
+                    <div className="flex flex-col gap-3">
+                      <label className="flex items-center gap-2.5 cursor-pointer text-xs text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={showAnswersAndExplanations}
+                          onChange={(e) => setShowAnswersAndExplanations(e.target.checked)}
+                          className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
+                        />
+                        <span className="font-semibold">Show correct answers and explanations</span>
+                        <span className="text-slate-500" title="Toggle visibility of answer feedback during test">
+                          ⓘ
+                        </span>
+                      </label>
+
+                      {showAnswersAndExplanations && (
+                        <div className="pl-6 flex flex-col gap-1.5">
+                          <span className="text-xs text-slate-400">Answer display mode</span>
+                          <select
+                            value={answerDisplayMode}
+                            onChange={(e) =>
+                              setAnswerDisplayMode(
+                                e.target.value as "ask" | "immediate" | "end"
+                              )
+                            }
+                            className="bg-slate-850 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white max-w-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          >
+                            <option value="ask">Let me ask for each answer (Check Answer Button)</option>
+                            <option value="immediate">Show immediately after selection</option>
+                            <option value="end">Display at the end of the test</option>
+                          </select>
+                        </div>
+                      )}
+
+                      {/* Randomize question order */}
+                      <label className="flex items-center gap-2.5 cursor-pointer text-xs text-slate-300 mt-2">
+                        <input
+                          type="checkbox"
+                          checked={isRandomized}
+                          onChange={(e) => setIsRandomized(e.target.checked)}
+                          className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
+                        />
+                        <span>Randomize the question order of your test</span>
+                        <span className="text-slate-500" title="Shuffles question sequence">
+                          ⓘ
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Launch Button Footer */}
+            <div className="p-6 bg-slate-900/60 flex items-center justify-between">
+              <span className="text-xs text-slate-400">
+                Ready to practice with {Math.min(questionCount, allQuestions.length)} questions in {mode === "study" ? "Practice" : "Certification"} Mode
+              </span>
+
               <button
                 onClick={() => startSession()}
-                className="w-full py-4 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-base shadow-xl shadow-blue-600/30 transition-all flex items-center justify-center gap-2"
+                className="px-8 py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-sm shadow-xl shadow-blue-600/30 transition-all flex items-center gap-2"
               >
-                <span>Launch Session →</span>
+                <span>Start Test →</span>
               </button>
-            </div>
-          </div>
-
-          {/* Domain Knowledge Cards */}
-          <div>
-            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">
-              Microsoft AZ-305 Exam Domains
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
-                <span className="text-xs font-semibold text-blue-400 block mb-1">Domain 1 (25-30%)</span>
-                <h4 className="text-sm font-bold text-slate-200 mb-2">Business Continuity Solutions</h4>
-                <p className="text-xs text-slate-400 mb-3">Backup policies, disaster recovery (ASR), HA topologies, RPO/RTO.</p>
-                <span className="px-2.5 py-1 rounded-md bg-slate-800 text-slate-300 font-mono text-xs">
-                  {domainCounts["Design Business Continuity Solutions"]} Questions
-                </span>
-              </div>
-
-              <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
-                <span className="text-xs font-semibold text-blue-400 block mb-1">Domain 2 (25-30%)</span>
-                <h4 className="text-sm font-bold text-slate-200 mb-2">Infrastructure Solutions</h4>
-                <p className="text-xs text-slate-400 mb-3">Compute architectures, AKS, App Services, hybrid networking, VPN, ExpressRoute.</p>
-                <span className="px-2.5 py-1 rounded-md bg-slate-800 text-slate-300 font-mono text-xs">
-                  {domainCounts["Design Infrastructure Solutions"]} Questions
-                </span>
-              </div>
-
-              <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
-                <span className="text-xs font-semibold text-blue-400 block mb-1">Domain 3 (20-25%)</span>
-                <h4 className="text-sm font-bold text-slate-200 mb-2">Data Storage Solutions</h4>
-                <p className="text-xs text-slate-400 mb-3">Azure SQL, Cosmos DB, Blob tiers, Data Lake Gen2, Synapse, storage redundancy.</p>
-                <span className="px-2.5 py-1 rounded-md bg-slate-800 text-slate-300 font-mono text-xs">
-                  {domainCounts["Design Data Storage Solutions"]} Questions
-                </span>
-              </div>
-
-              <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
-                <span className="text-xs font-semibold text-blue-400 block mb-1">Domain 4 (25-30%)</span>
-                <h4 className="text-sm font-bold text-slate-200 mb-2">Identity & Monitoring</h4>
-                <p className="text-xs text-slate-400 mb-3">Microsoft Entra ID, PIM, Conditional Access, Azure Policy, Log Analytics, Key Vault.</p>
-                <span className="px-2.5 py-1 rounded-md bg-slate-800 text-slate-300 font-mono text-xs">
-                  {domainCounts["Design Identity, Governance, and Monitoring Solutions"]} Questions
-                </span>
-              </div>
             </div>
           </div>
         </main>
@@ -751,9 +1164,9 @@ export default function AZ305App() {
     );
   }
 
-  // ==========================================
+  // =======================================================================
   // VIEW 2: EXAM RESULTS & SCORE REPORT
-  // ==========================================
+  // =======================================================================
   if (view === "results") {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col p-4 sm:p-6 lg:p-8">
@@ -762,12 +1175,12 @@ export default function AZ305App() {
           <div className="flex items-center justify-between">
             <button
               onClick={() => setView("dashboard")}
-              className="px-4 py-2 rounded-xl text-xs sm:text-sm font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors flex items-center gap-2"
+              className="px-4 py-2 rounded-xl text-xs sm:text-sm font-medium bg-slate-850 hover:bg-slate-800 text-slate-200 border border-slate-700 transition-colors flex items-center gap-2"
             >
-              ← Back to Dashboard
+              ← Back to Setup Hub
             </button>
             <span className="text-xs text-slate-400">
-              Session completed in {formatTime(elapsedTime)}
+              Completed in {formatTime(elapsedTime)}
             </span>
           </div>
 
@@ -787,7 +1200,7 @@ export default function AZ305App() {
                     : "bg-rose-500/20 text-rose-400 border border-rose-500/30"
                 }`}
               >
-                {resultsData.isPassed ? "PASSED - CERTIFICATION READY" : "NEEDS FURTHER REVIEW"}
+                {resultsData.isPassed ? "PASSED - CERTIFICATION READY" : "NEEDS FURTHER PRACTICE"}
               </span>
               <h2 className="text-3xl font-extrabold text-white">
                 Score: {resultsData.scaledScore} / 1000
@@ -801,19 +1214,40 @@ export default function AZ305App() {
               <button
                 onClick={() => {
                   setMode("study");
+                  setShowAnswersAndExplanations(true);
                   setShowAnswer(true);
                   setCurrentIndex(0);
                   setView("quiz");
                 }}
-                className="px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm shadow-lg shadow-blue-500/20 transition-all text-center"
+                className="px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm shadow-lg shadow-blue-500/20 transition-all text-center"
               >
                 Review All Questions & Rationales
               </button>
+
+              {resultsData.failedIds.length > 0 && (
+                <button
+                  onClick={() => {
+                    const failedPool = allQuestions.filter((q) =>
+                      resultsData.failedIds.includes(q.id)
+                    );
+                    setActiveQuestions(failedPool);
+                    setCurrentIndex(0);
+                    setUserAnswers({});
+                    setShowAnswer(false);
+                    setMode("study");
+                    setView("quiz");
+                  }}
+                  className="px-6 py-3 rounded-xl bg-rose-600/30 hover:bg-rose-600/50 border border-rose-500/40 text-rose-200 font-bold text-xs sm:text-sm transition-all text-center"
+                >
+                  Retake {resultsData.failedIds.length} Missed Questions
+                </button>
+              )}
+
               <button
-                onClick={() => startSession("exam")}
-                className="px-6 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-sm transition-all text-center"
+                onClick={() => setView("dashboard")}
+                className="px-6 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-semibold text-xs sm:text-sm transition-all text-center"
               >
-                Retake Exam
+                Configure New Session
               </button>
             </div>
           </div>
@@ -853,115 +1287,89 @@ export default function AZ305App() {
     );
   }
 
-  // ==========================================
-  // VIEW 3: ACTIVE QUIZ / EXAM SESSION
-  // ==========================================
-  if (!currentQ) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
-        <div className="p-8 rounded-2xl bg-slate-900 border border-slate-800 text-center">
-          <p className="mb-4">No questions found in this session.</p>
-          <button
-            onClick={() => setView("dashboard")}
-            className="px-6 py-2 bg-blue-600 rounded-xl"
-          >
-            Back to Dashboard
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const currentAnswer = userAnswers[currentQ.id];
-  const isFlagged = flaggedIds.includes(currentQ.id);
-
+  // =======================================================================
+  // VIEW 3: INTERACTIVE QUIZ & EXAM VIEW
+  // =======================================================================
   return (
-    <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
-      {/* Top Session Navigation Header */}
-      <header className="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3 sm:px-6 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => {
-              if (mode === "exam" && !confirm("Exit exam session? Your current progress will be lost.")) {
-                return;
-              }
-              setView("dashboard");
-            }}
-            className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 flex items-center justify-center transition-colors text-sm"
-            title="Return to Dashboard"
-          >
-            ←
-          </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-sm text-white">AZ-305 Session</span>
-              <span
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
-                  mode === "exam"
-                    ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                    : "bg-blue-500/20 text-blue-300 border border-blue-500/30"
-                }`}
-              >
-                {mode === "exam" ? "Certification Mode" : "Study Mode"}
-              </span>
-            </div>
-            <p className="text-xs text-slate-400">
-              Question {currentIndex + 1} of {activeQuestions.length}
-            </p>
-          </div>
-        </div>
-
-        {/* Center Timer Display & Actions */}
-        <div className="flex items-center gap-3 sm:gap-4">
-          <div
-            className={`px-3 py-1.5 rounded-xl border text-xs sm:text-sm font-mono font-bold flex items-center gap-2 ${
-              isTimed && timeRemaining < 300
-                ? "bg-rose-500/20 border-rose-500/40 text-rose-300 animate-pulse"
-                : "bg-slate-800 border-slate-700 text-slate-200"
-            }`}
-          >
-            <span>⏱️</span>
-            <span>{isTimed ? formatTime(timeRemaining) : `Elapsed: ${formatTime(elapsedTime)}`}</span>
-          </div>
-
-          <button
-            onClick={() => toggleFlag(currentQ.id)}
-            className={`p-2 rounded-xl text-xs sm:text-sm font-medium border flex items-center gap-1.5 transition-colors ${
-              isFlagged
-                ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
-                : "bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-700"
-            }`}
-            title="Flag question for review"
-          >
-            <span>{isFlagged ? "★ Flagged" : "☆ Flag"}</span>
-          </button>
-
-          <button
-            onClick={() => setShowPalette(!showPalette)}
-            className="px-3 py-1.5 rounded-xl text-xs sm:text-sm font-medium bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 transition-colors"
-          >
-            Palette
-          </button>
-
-          {mode === "exam" && (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+      {/* Top Header */}
+      <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur-md px-4 sm:px-6 py-3 sticky top-0 z-20 shadow-md">
+        <div className="max-w-5xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
             <button
               onClick={() => {
-                if (confirm("Are you sure you want to submit your exam now?")) {
+                if (confirm("Return to Setup Hub? Current session answers will be cleared.")) {
+                  setView("dashboard");
+                }
+              }}
+              className="text-xs text-slate-400 hover:text-white flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 transition-colors"
+            >
+              ← Hub
+            </button>
+            <div>
+              <span className="text-xs font-bold text-slate-200">
+                Question {currentIndex + 1} of {activeQuestions.length}
+              </span>
+              <div className="w-32 sm:w-48 h-1.5 bg-slate-800 rounded-full mt-1 overflow-hidden">
+                <div
+                  className="h-full bg-blue-500 transition-all"
+                  style={{
+                    width: `${((currentIndex + 1) / activeQuestions.length) * 100}%`,
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {/* Timer */}
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-800 border border-slate-700 text-xs font-mono">
+              <span className="text-slate-400">⏱</span>
+              <span className={timeLimitMode === "timed" && timeRemaining < 300 ? "text-rose-400 font-bold" : "text-slate-200"}>
+                {timeLimitMode === "timed" ? formatTime(timeRemaining) : formatTime(elapsedTime)}
+              </span>
+            </div>
+
+            {/* Bookmark Button */}
+            <button
+              onClick={() => currentQ && toggleBookmark(currentQ.id)}
+              className={`p-2 rounded-lg border transition-colors ${
+                currentQ && flaggedIds.includes(currentQ.id)
+                  ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
+                  : "bg-slate-800 border-slate-700 text-slate-400 hover:text-white"
+              }`}
+              title="Bookmark Question"
+            >
+              ★
+            </button>
+
+            {/* Palette Toggle */}
+            <button
+              onClick={() => setShowPalette(!showPalette)}
+              className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-xs text-slate-200 hover:text-white transition-colors"
+            >
+              Palette ⊞
+            </button>
+
+            {/* Submit Exam Button */}
+            <button
+              onClick={() => {
+                if (confirm("Are you ready to submit your test and review your score report?")) {
                   setView("results");
                 }
               }}
-              className="px-4 py-1.5 rounded-xl text-xs sm:text-sm font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/20 transition-all"
+              className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors shadow-md shadow-emerald-600/20"
             >
               Submit Exam
             </button>
-          )}
+          </div>
         </div>
       </header>
 
       {/* Main Question Card View */}
       <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col gap-6">
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-7 shadow-xl">
-          {/* Question Metadata Header */}
+          {/* Metadata Header */}
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-3 py-1 rounded-lg bg-blue-600/20 border border-blue-500/30 text-blue-400 font-bold text-xs tracking-wider uppercase">
@@ -969,6 +1377,9 @@ export default function AZ305App() {
               </span>
               <span className="px-2.5 py-0.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs">
                 {currentQ.questionType}
+              </span>
+              <span className="px-2 py-0.5 rounded-lg bg-slate-850 border border-slate-800 text-slate-400 text-[11px]">
+                {getQuestionDifficulty(currentQ.id)}
               </span>
             </div>
 
@@ -997,6 +1408,18 @@ export default function AZ305App() {
             </div>
           )}
 
+          {/* Case Study Header if present */}
+          {currentQ.questionType === "Case Study" && (
+            <div className="mb-6 p-4 rounded-2xl bg-blue-950/40 border border-blue-500/30 text-blue-200">
+              <div className="text-xs uppercase font-bold tracking-wider text-blue-400 mb-1">
+                {currentQ.caseStudyTitle || `Case Study: ${currentQ.topic || "Enterprise Architecture"}`}
+              </div>
+              <p className="text-xs text-slate-300">
+                Review the background tabs below, then answer each question in this case study series.
+              </p>
+            </div>
+          )}
+
           {/* Case Study Sections Tabs if present (e.g. Q63, Q103) */}
           {currentQ.sections && currentQ.sections.length > 0 && (
             <div className="mb-6 rounded-2xl border border-slate-700 bg-slate-950/60 overflow-hidden">
@@ -1021,7 +1444,7 @@ export default function AZ305App() {
             </div>
           )}
 
-          {/* Context Table if present */}
+          {/* Context Table if present (e.g. Q2) */}
           {currentQ.contextTable && currentQ.contextTable.length > 0 && (
             <div className="overflow-x-auto my-4 rounded-xl border border-slate-700 bg-slate-950/60 p-2">
               <table className="w-full text-left text-xs border-collapse">
@@ -1049,16 +1472,12 @@ export default function AZ305App() {
             </div>
           )}
 
-          {/* Question Prompt */}
-          {currentQ.question && (
-            <div className="text-slate-100 text-base sm:text-lg font-medium leading-relaxed whitespace-pre-line mb-6">
-              {currentQ.question}
-            </div>
-          )}
+          {/* Formatted Question Text: Splits prose vs CLI commands vs JSON blocks */}
+          <FormattedQuestionText text={currentQ.question} />
 
-          {/* ==================================================== */}
-          {/* INTERACTIVE INPUTS: ALL QUESTION TYPES SUPPORTED     */}
-          {/* ==================================================== */}
+          {/* ========================================================= */}
+          {/* INTERACTIVE INPUTS: ALL QUESTION TYPES SUPPORTED          */}
+          {/* ========================================================= */}
           <div className="mt-4">
             {/* 1. Multiple Choice */}
             {currentQ.questionType === "Multiple Choice" && currentQ.options && (
@@ -1069,7 +1488,7 @@ export default function AZ305App() {
                   let cardStyle =
                     "bg-slate-850 hover:bg-slate-800 border-slate-700/80 text-slate-200";
 
-                  if (showAnswer && mode === "study") {
+                  if (showAnswer && mode === "study" && showAnswersAndExplanations) {
                     if (isCorrect) {
                       cardStyle = "bg-emerald-950/40 border-emerald-500 text-emerald-200";
                     } else if (isSelected && !isCorrect) {
@@ -1087,9 +1506,9 @@ export default function AZ305App() {
                     >
                       <div
                         className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 mt-0.5 text-xs font-bold ${
-                          showAnswer && mode === "study" && isCorrect
+                          showAnswer && mode === "study" && showAnswersAndExplanations && isCorrect
                             ? "border-emerald-500 bg-emerald-500 text-slate-950"
-                            : showAnswer && mode === "study" && isSelected && !isCorrect
+                            : showAnswer && mode === "study" && showAnswersAndExplanations && isSelected && !isCorrect
                             ? "border-rose-500 bg-rose-500 text-white"
                             : isSelected
                             ? "border-blue-500 bg-blue-500 text-white"
@@ -1124,7 +1543,7 @@ export default function AZ305App() {
                     let cardStyle =
                       "bg-slate-850 hover:bg-slate-800 border-slate-700/80 text-slate-200";
 
-                    if (showAnswer && mode === "study") {
+                    if (showAnswer && mode === "study" && showAnswersAndExplanations) {
                       if (isCorrect) {
                         cardStyle = "bg-emerald-950/40 border-emerald-500 text-emerald-200";
                       } else if (isSelected && !isCorrect) {
@@ -1142,9 +1561,9 @@ export default function AZ305App() {
                       >
                         <div
                           className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 mt-0.5 text-xs font-bold ${
-                            showAnswer && mode === "study" && isCorrect
+                            showAnswer && mode === "study" && showAnswersAndExplanations && isCorrect
                               ? "border-emerald-500 bg-emerald-500 text-slate-950"
-                              : showAnswer && mode === "study" && isSelected && !isCorrect
+                              : showAnswer && mode === "study" && showAnswersAndExplanations && isSelected && !isCorrect
                               ? "border-rose-500 bg-rose-500 text-white"
                               : isSelected
                               ? "border-blue-500 bg-blue-500 text-white"
@@ -1170,7 +1589,9 @@ export default function AZ305App() {
                       <tr className="border-b border-slate-800 bg-slate-850/80 text-slate-400 text-xs">
                         <th className="p-3 sm:p-4 font-semibold">Statement</th>
                         <th className="p-3 sm:p-4 text-center w-28">Selection</th>
-                        {showAnswer && mode === "study" && <th className="p-3 sm:p-4 text-center w-28">Correct</th>}
+                        {showAnswer && mode === "study" && showAnswersAndExplanations && (
+                          <th className="p-3 sm:p-4 text-center w-28">Correct</th>
+                        )}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
@@ -1207,7 +1628,7 @@ export default function AZ305App() {
                                 </button>
                               </div>
                             </td>
-                            {showAnswer && mode === "study" && (
+                            {showAnswer && mode === "study" && showAnswersAndExplanations && (
                               <td className="p-3 sm:p-4 text-center">
                                 <span
                                   className={`px-2.5 py-1 rounded-full text-xs font-bold ${
@@ -1228,12 +1649,15 @@ export default function AZ305App() {
                 </div>
               )}
 
-            {/* 4. Dropdown / Hotspot & SubQuestions (e.g. Q2, Q4, Q12, Q30, Q36, etc.) */}
+            {/* 4. Dropdown / Hotspot & SubQuestions (e.g. Q2, Q4, Q12, Q30, Q36) */}
             {currentQ.subQuestions && currentQ.subQuestions.length > 0 && (
               <div className="grid gap-4">
                 {currentQ.subQuestions.map((sq, sqIdx) => {
                   const currentSelections = currentAnswer || {};
-                  const userVal = currentSelections[sqIdx.toString()] || currentSelections[sq.prompt || ""] || "";
+                  const userVal =
+                    currentSelections[sqIdx.toString()] ||
+                    currentSelections[sq.prompt || ""] ||
+                    "";
                   const isCorrect = userVal === sq.correctAnswer;
                   const availableOptions = sq.options || currentQ.availableOptions || [];
 
@@ -1262,7 +1686,7 @@ export default function AZ305App() {
                           ))}
                         </select>
 
-                        {showAnswer && mode === "study" && (
+                        {showAnswer && mode === "study" && showAnswersAndExplanations && (
                           <div className="shrink-0">
                             <span
                               className={`px-3 py-1.5 text-xs rounded-xl font-bold border inline-block ${
@@ -1277,7 +1701,7 @@ export default function AZ305App() {
                         )}
                       </div>
 
-                      {showAnswer && mode === "study" && sq.explanation && (
+                      {showAnswer && mode === "study" && showAnswersAndExplanations && sq.explanation && (
                         <div className="text-xs text-slate-400 bg-slate-900/60 p-3 rounded-lg border border-slate-800 leading-relaxed">
                           💡 {sq.explanation}
                         </div>
@@ -1288,12 +1712,13 @@ export default function AZ305App() {
               </div>
             )}
 
-            {/* 5. Dropdown / Matching with mapping */}
+            {/* 5. Dropdown / Matching (handles component and field keys) */}
             {currentQ.questionType === "Dropdown / Matching" && currentQ.mapping && (
               <div className="grid gap-4">
                 {currentQ.mapping.map((m, mIdx) => {
+                  const label = m.component || m.field || `Option ${mIdx + 1}`;
                   const currentSelections = currentAnswer || {};
-                  const userVal = currentSelections[m.component] || "";
+                  const userVal = currentSelections[label] || "";
                   const isCorrect = userVal === m.selectedOption;
 
                   return (
@@ -1302,13 +1727,13 @@ export default function AZ305App() {
                       className="p-4 rounded-xl bg-slate-850 border border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                     >
                       <span className="text-sm font-medium text-slate-200">
-                        {m.component}:
+                        {label}:
                       </span>
                       <div className="flex items-center gap-2">
                         <select
                           value={userVal}
                           onChange={(e) =>
-                            handleDropdownSelect(currentQ.id, m.component, e.target.value)
+                            handleDropdownSelect(currentQ.id, label, e.target.value)
                           }
                           className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
@@ -1319,7 +1744,7 @@ export default function AZ305App() {
                             </option>
                           ))}
                         </select>
-                        {showAnswer && mode === "study" && (
+                        {showAnswer && mode === "study" && showAnswersAndExplanations && (
                           <span
                             className={`px-2 py-1 text-xs rounded-md font-semibold ${
                               isCorrect
@@ -1371,7 +1796,7 @@ export default function AZ305App() {
                               </option>
                             ))}
                           </select>
-                          {showAnswer && mode === "study" && (
+                          {showAnswer && mode === "study" && showAnswersAndExplanations && (
                             <span
                               className={`px-2 py-1 text-xs rounded-md font-semibold ${
                                 isCorrect
@@ -1393,14 +1818,75 @@ export default function AZ305App() {
             {currentQ.questionType === "Drag and Drop / Ordering" && (
               <div className="grid gap-3">
                 <p className="text-xs text-blue-400 font-semibold mb-1">
-                  Place the following steps in the correct sequence.
+                  Place the following steps in the correct architectural sequence.
                 </p>
-                {(currentQ.correctOrder || currentQ.correctPipeline || currentQ.availableOptions || []).map(
-                  (_, oIdx) => {
+
+                {/* Pipeline visual if present (e.g. Q79) */}
+                {currentQ.pipeline ? (
+                  <div className="grid gap-3">
+                    {currentQ.pipeline.map((pStep, pIdx) => {
+                      const isFixed = !(currentQ.availableOptions || []).includes(pStep.name);
+                      const currentSelections = currentAnswer || {};
+                      const userVal = currentSelections[pIdx.toString()] || "";
+                      const isCorrect = userVal === pStep.name;
+
+                      return (
+                        <div
+                          key={pIdx}
+                          className="p-4 rounded-xl bg-slate-850 border border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="w-6 h-6 rounded-full bg-blue-600/30 text-blue-400 text-xs font-bold flex items-center justify-center shrink-0">
+                              {pIdx + 1}
+                            </span>
+                            <span className="text-sm font-bold text-slate-200">
+                              {pStep.step}:
+                            </span>
+                          </div>
+
+                          {isFixed ? (
+                            <div className="px-3.5 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs sm:text-sm text-slate-400 font-mono">
+                              🔒 {pStep.name} (Fixed System Component)
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2 flex-1 max-w-md">
+                              <select
+                                value={userVal}
+                                onChange={(e) =>
+                                  handleDropdownSelect(currentQ.id, pIdx.toString(), e.target.value)
+                                }
+                                className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 w-full"
+                              >
+                                <option value="">-- Select service --</option>
+                                {(currentQ.availableOptions || []).map((opt) => (
+                                  <option key={opt} value={opt}>
+                                    {opt}
+                                  </option>
+                                ))}
+                              </select>
+                              {showAnswer && mode === "study" && showAnswersAndExplanations && (
+                                <span
+                                  className={`px-2 py-1 text-xs rounded-md font-semibold shrink-0 ${
+                                    isCorrect
+                                      ? "bg-emerald-500/20 text-emerald-400"
+                                      : "bg-rose-500/20 text-rose-400"
+                                  }`}
+                                >
+                                  Target: {pStep.name}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  /* Standard Step sequence (e.g. Q74) */
+                  (currentQ.correctOrder || currentQ.availableOptions || []).map((_, oIdx) => {
                     const currentSelections = currentAnswer || {};
                     const userVal = currentSelections[oIdx.toString()] || "";
-                    const targetVal =
-                      currentQ.correctOrder?.[oIdx] || currentQ.correctPipeline?.[oIdx];
+                    const targetVal = currentQ.correctOrder?.[oIdx];
                     const isCorrect = userVal === targetVal;
                     const options = currentQ.availableOptions || [];
 
@@ -1427,7 +1913,7 @@ export default function AZ305App() {
                               </option>
                             ))}
                           </select>
-                          {showAnswer && mode === "study" && (
+                          {showAnswer && mode === "study" && showAnswersAndExplanations && targetVal && (
                             <span
                               className={`px-2 py-1 text-xs rounded-md font-semibold shrink-0 ${
                                 isCorrect
@@ -1441,123 +1927,260 @@ export default function AZ305App() {
                         </div>
                       </div>
                     );
-                  }
+                  })
                 )}
               </div>
             )}
 
-            {/* 8. Solution Evaluation Series */}
+            {/* 8. Solution Evaluation Series - Clean Paginated Part-by-Part (No long scrolling) */}
             {currentQ.questionType === "Case Study / Solution Evaluation Series" &&
               currentQ.solutions && (
-                <div className="grid gap-6">
-                  {currentQ.solutions.map((sol) => {
+                <div className="flex flex-col gap-4">
+                  {/* Part Navigation Pills */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-slate-950 border border-slate-800">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-semibold text-slate-400 mr-1">Parts:</span>
+                      {currentQ.solutions.map((sol) => {
+                        const ansMap = currentAnswer || {};
+                        const isAnswered = ansMap[sol.part.toString()] !== undefined;
+                        const isActive = activeSeriesPart === sol.part;
+
+                        return (
+                          <button
+                            key={sol.part}
+                            onClick={() => setActiveSeriesPart(sol.part)}
+                            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                              isActive
+                                ? "bg-blue-600 text-white shadow-md shadow-blue-500/20 ring-1 ring-blue-400"
+                                : isAnswered
+                                ? "bg-blue-950/60 border border-blue-500/30 text-blue-300 hover:bg-slate-800"
+                                : "bg-slate-900 border border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                            }`}
+                          >
+                            <span>Part {sol.part}</span>
+                            {isAnswered && <span className="text-[10px] text-emerald-400">✓</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <span className="text-xs text-slate-400 font-mono">
+                      Part {activeSeriesPart} of {currentQ.solutions.length}
+                    </span>
+                  </div>
+
+                  {/* Active Part Card */}
+                  {(() => {
+                    const activeSol =
+                      currentQ.solutions.find((s) => s.part === activeSeriesPart) ||
+                      currentQ.solutions[0];
                     const ansMap = currentAnswer || {};
-                    const userVal = ansMap[sol.part.toString()];
-                    const isCorrect = userVal === sol.correctAnswer;
+                    const userVal = ansMap[activeSol.part.toString()];
+                    const isCorrect = userVal === activeSol.correctAnswer;
+                    const isRevealed =
+                      (showAnswer || partShowAnswer[`part_${activeSol.part}`]) &&
+                      mode === "study" &&
+                      showAnswersAndExplanations;
 
                     return (
-                      <div
-                        key={sol.part}
-                        className="p-5 rounded-2xl bg-slate-850 border border-slate-700/80 flex flex-col gap-3"
-                      >
+                      <div className="p-6 rounded-2xl bg-slate-850 border border-slate-700/80 flex flex-col gap-4 shadow-lg">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold uppercase tracking-wider text-blue-400">
-                            Part {sol.part} of {currentQ.solutions?.length}
+                          <span className="text-xs font-bold uppercase tracking-wider text-blue-400 flex items-center gap-1.5">
+                            <span>Part {activeSol.part} of {currentQ.solutions.length}</span>
+                            <span className="text-slate-500">•</span>
+                            <span className="text-slate-400 normal-case">Independent Evaluation</span>
                           </span>
-                          {showAnswer && mode === "study" && (
+
+                          {isRevealed && (
                             <span
-                              className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
+                              className={`text-xs font-bold px-3 py-1 rounded-full border ${
                                 isCorrect
-                                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                                  : "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                                  ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
+                                  : "bg-rose-500/20 text-rose-300 border-rose-500/30"
                               }`}
                             >
-                              Correct: {sol.correctAnswer}
+                              {isCorrect ? "✓ Correct" : `Target Answer: ${activeSol.correctAnswer}`}
                             </span>
                           )}
                         </div>
-                        <div className="text-slate-200 text-sm font-medium">
-                          <strong>Proposed Solution:</strong> {sol.proposedSolution}
-                        </div>
-                        <p className="text-xs text-slate-400">{sol.question}</p>
 
-                        <div className="flex items-center gap-3 mt-1">
-                          {["Yes", "No"].map((choice) => (
-                            <button
-                              key={choice}
-                              onClick={() =>
-                                handleDropdownSelect(currentQ.id, sol.part.toString(), choice)
+                        <div className="text-slate-100 text-sm sm:text-base leading-relaxed bg-slate-900/80 p-4 rounded-xl border border-slate-800">
+                          <div className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-1">
+                            Proposed Solution:
+                          </div>
+                          {activeSol.proposedSolution}
+                        </div>
+
+                        <p className="text-sm font-medium text-slate-200">{activeSol.question}</p>
+
+                        {/* Yes / No Selection */}
+                        <div className="flex items-center gap-3 pt-1">
+                          {["Yes", "No"].map((choice) => {
+                            const isSelected = userVal === choice;
+                            let btnStyle = "bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800";
+
+                            if (isRevealed) {
+                              if (choice === activeSol.correctAnswer) {
+                                btnStyle = "bg-emerald-950/40 border-emerald-500 text-emerald-200 ring-1 ring-emerald-500";
+                              } else if (isSelected && choice !== activeSol.correctAnswer) {
+                                btnStyle = "bg-rose-950/40 border-rose-500 text-rose-200 ring-1 ring-rose-500";
                               }
-                              className={`px-5 py-2 rounded-lg font-bold text-xs sm:text-sm border transition-colors ${
-                                userVal === choice
-                                  ? "bg-blue-600 border-blue-500 text-white"
-                                  : "bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800"
-                              }`}
-                            >
-                              {choice}
-                            </button>
-                          ))}
+                            } else if (isSelected) {
+                              btnStyle = "bg-blue-600 border-blue-500 text-white shadow-md shadow-blue-500/20";
+                            }
+
+                            return (
+                              <button
+                                key={choice}
+                                onClick={() =>
+                                  handleDropdownSelect(currentQ.id, activeSol.part.toString(), choice)
+                                }
+                                className={`px-6 py-2.5 rounded-xl font-bold text-sm border transition-all ${btnStyle}`}
+                              >
+                                {choice}
+                              </button>
+                            );
+                          })}
                         </div>
 
-                        {showAnswer && mode === "study" && sol.explanation && (
-                          <div className="mt-2 p-3 rounded-lg bg-slate-900/80 border border-slate-800 text-xs text-slate-300 leading-relaxed">
-                            💡 {sol.explanation}
+                        {/* Part Navigation & Check Answer */}
+                        <div className="flex items-center justify-between pt-4 mt-2 border-t border-slate-800">
+                          <div className="flex items-center gap-2">
+                            <button
+                              disabled={activeSeriesPart <= 1}
+                              onClick={() => setActiveSeriesPart((prev) => Math.max(1, prev - 1))}
+                              className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 text-xs text-slate-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            >
+                              ← Previous Part
+                            </button>
+
+                            <button
+                              disabled={activeSeriesPart >= currentQ.solutions.length}
+                              onClick={() =>
+                                setActiveSeriesPart((prev) =>
+                                  Math.min(currentQ.solutions!.length, prev + 1)
+                                )
+                              }
+                              className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 text-xs text-slate-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            >
+                              Next Part →
+                            </button>
+                          </div>
+
+                          {mode === "study" && showAnswersAndExplanations && !isRevealed && (
+                            <button
+                              onClick={() =>
+                                setPartShowAnswer((prev) => ({
+                                  ...prev,
+                                  [`part_${activeSol.part}`]: true,
+                                }))
+                              }
+                              className="px-4 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+                            >
+                              Check Part {activeSol.part}
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Part Explanation */}
+                        {isRevealed && activeSol.explanation && (
+                          <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-slate-300 leading-relaxed whitespace-pre-line animate-in fade-in duration-200">
+                            <div className="font-bold text-emerald-400 mb-1 flex items-center gap-1.5">
+                              <span>💡</span> Part {activeSol.part} Architectural Rationale:
+                            </div>
+                            {activeSol.explanation}
                           </div>
                         )}
                       </div>
                     );
-                  })}
+                  })()}
                 </div>
               )}
 
-            {/* 9. Case Study with Child Questions (e.g. Q63, Q103) */}
+            {/* 9. Case Study with Child Questions - Clean Paginated Question-by-Question */}
             {currentQ.questionType === "Case Study" && currentQ.questions && (
-              <div className="grid gap-6">
-                <div className="text-xs font-bold text-blue-400 uppercase tracking-wider">
-                  Case Study Questions ({currentQ.questions.length})
+              <div className="flex flex-col gap-4">
+                {/* Child Question Navigation Pills */}
+                <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-slate-950 border border-slate-800">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs font-semibold text-slate-400 mr-1">Case Questions:</span>
+                    {currentQ.questions.map((cq, cqIdx) => {
+                      const ansMap = currentAnswer || {};
+                      const isAnswered = ansMap[cqIdx] !== undefined;
+                      const isActive = activeCaseChildIndex === cqIdx;
+
+                      return (
+                        <button
+                          key={cqIdx}
+                          onClick={() => setActiveCaseChildIndex(cqIdx)}
+                          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                            isActive
+                              ? "bg-blue-600 text-white shadow-md shadow-blue-500/20 ring-1 ring-blue-400"
+                              : isAnswered
+                              ? "bg-blue-950/60 border border-blue-500/30 text-blue-300 hover:bg-slate-800"
+                              : "bg-slate-900 border border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                          }`}
+                        >
+                          <span>Q{cq.questionNumber || cqIdx + 1}</span>
+                          {isAnswered && <span className="text-[10px] text-emerald-400">✓</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <span className="text-xs text-slate-400 font-mono">
+                    Question {activeCaseChildIndex + 1} of {currentQ.questions.length}
+                  </span>
                 </div>
-                {currentQ.questions.map((cq, cqIdx) => {
+
+                {/* Active Child Question Card */}
+                {(() => {
+                  const activeCQ = currentQ.questions[activeCaseChildIndex] || currentQ.questions[0];
                   const ansMap = currentAnswer || {};
-                  const childAns = ansMap[cqIdx];
+                  const childAns = ansMap[activeCaseChildIndex];
+                  const isRevealed =
+                    (showAnswer || partShowAnswer[`cq_${activeCaseChildIndex}`]) &&
+                    mode === "study" &&
+                    showAnswersAndExplanations;
 
                   return (
-                    <div
-                      key={cqIdx}
-                      className="p-5 rounded-2xl bg-slate-850 border border-slate-700/80 flex flex-col gap-4"
-                    >
+                    <div className="p-6 rounded-2xl bg-slate-850 border border-slate-700/80 flex flex-col gap-4 shadow-lg">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-400">
-                          Question {cq.questionNumber || cqIdx + 1} of {currentQ.questions?.length}
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                          Question {activeCQ.questionNumber || activeCaseChildIndex + 1} of {currentQ.questions.length}
                         </span>
-                        <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                          {cq.questionType}
+                        <span className="text-[11px] px-2.5 py-0.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 font-medium">
+                          {activeCQ.questionType}
                         </span>
                       </div>
 
-                      <div className="text-sm font-medium text-slate-100">
-                        {cq.question}
+                      <div className="text-slate-100 text-sm sm:text-base font-medium leading-relaxed">
+                        {activeCQ.question}
                       </div>
 
-                      {/* Child Options (Multiple Choice or Select) */}
-                      {cq.options && (
-                        <div className="grid gap-2">
-                          {cq.options.map((opt, oIdx) => {
+                      {/* Child Options (Multiple Choice or Multiple Select) */}
+                      {activeCQ.options && (
+                        <div className="grid gap-2.5">
+                          {activeCQ.options.map((opt, oIdx) => {
                             const isMulti =
-                              cq.questionType === "Multiple Select" ||
-                              cq.questionType === "Multiple Choice (Select Two)";
+                              activeCQ.questionType === "Multiple Select" ||
+                              activeCQ.questionType === "Multiple Choice (Select Two)";
                             const isSelected = isMulti
                               ? Array.isArray(childAns) && childAns.includes(opt)
                               : childAns === opt;
                             const isCorrect = isMulti
-                              ? (cq.correctAnswers || []).includes(opt)
-                              : cq.correctAnswer === opt;
+                              ? (activeCQ.correctAnswers || []).includes(opt)
+                              : activeCQ.correctAnswer === opt;
 
-                            let btnStyle = "bg-slate-900 border-slate-700 text-slate-300";
-                            if (showAnswer && mode === "study") {
+                            let btnStyle =
+                              "bg-slate-900 border-slate-700/80 text-slate-300 hover:bg-slate-800";
+                            if (isRevealed) {
                               if (isCorrect) {
-                                btnStyle = "bg-emerald-950/40 border-emerald-500 text-emerald-200";
+                                btnStyle =
+                                  "bg-emerald-950/40 border-emerald-500 text-emerald-200 ring-1 ring-emerald-500";
                               } else if (isSelected && !isCorrect) {
-                                btnStyle = "bg-rose-950/40 border-rose-500 text-rose-200";
+                                btnStyle =
+                                  "bg-rose-950/40 border-rose-500 text-rose-200 ring-1 ring-rose-500";
                               }
                             } else if (isSelected) {
                               btnStyle = "bg-blue-600/20 border-blue-500 text-blue-200";
@@ -1568,49 +2191,70 @@ export default function AZ305App() {
                                 key={oIdx}
                                 onClick={() => {
                                   if (isMulti) {
-                                    const currentList: string[] = Array.isArray(childAns) ? childAns : [];
+                                    const currentList: string[] = Array.isArray(childAns)
+                                      ? childAns
+                                      : [];
                                     const nextList = currentList.includes(opt)
                                       ? currentList.filter((x) => x !== opt)
                                       : [...currentList, opt];
-                                    handleCaseChildAnswer(currentQ.id, cqIdx, nextList);
+                                    handleCaseChildAnswer(currentQ.id, activeCaseChildIndex, nextList);
                                   } else {
-                                    handleCaseChildAnswer(currentQ.id, cqIdx, opt);
+                                    handleCaseChildAnswer(currentQ.id, activeCaseChildIndex, opt);
                                   }
                                 }}
-                                className={`p-3 rounded-xl border text-xs sm:text-sm text-left transition-all flex items-center gap-2.5 ${btnStyle}`}
+                                className={`p-3.5 rounded-xl border text-xs sm:text-sm text-left transition-all flex items-start gap-3 ${btnStyle}`}
                               >
-                                <span className="font-bold text-slate-400">
-                                  {String.fromCharCode(65 + oIdx)}.
-                                </span>
-                                <span>{opt}</span>
+                                <div
+                                  className={`w-5 h-5 rounded-${
+                                    isMulti ? "md" : "full"
+                                  } border flex items-center justify-center shrink-0 mt-0.5 text-xs font-bold ${
+                                    isRevealed && isCorrect
+                                      ? "border-emerald-500 bg-emerald-500 text-slate-950"
+                                      : isRevealed && isSelected && !isCorrect
+                                      ? "border-rose-500 bg-rose-500 text-white"
+                                      : isSelected
+                                      ? "border-blue-500 bg-blue-500 text-white"
+                                      : "border-slate-600 text-slate-400"
+                                  }`}
+                                >
+                                  {isMulti
+                                    ? isSelected
+                                      ? "✓"
+                                      : ""
+                                    : String.fromCharCode(65 + oIdx)}
+                                </div>
+                                <span className="flex-1 leading-normal">{opt}</span>
                               </button>
                             );
                           })}
                         </div>
                       )}
 
-                      {/* Child Hotspot / Subquestions */}
-                      {cq.subQuestions && (
+                      {/* Child Hotspot / Subquestions (e.g. Q63 CQ5) */}
+                      {activeCQ.subQuestions && (
                         <div className="grid gap-3">
-                          {cq.subQuestions.map((sq, sqIdx) => {
+                          {activeCQ.subQuestions.map((sq, sqIdx) => {
                             const sqVal = (childAns || {})[sqIdx.toString()] || "";
                             const isCorrect = sqVal === sq.correctAnswer;
                             return (
                               <div
                                 key={sqIdx}
-                                className="p-3.5 rounded-xl bg-slate-900 border border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                                className="p-4 rounded-xl bg-slate-900 border border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                               >
-                                <span className="text-xs font-semibold text-slate-200">
+                                <span className="text-xs sm:text-sm font-semibold text-slate-200">
                                   {sq.prompt}:
                                 </span>
                                 <div className="flex items-center gap-2">
                                   <select
                                     value={sqVal}
                                     onChange={(e) => {
-                                      const nextMap = { ...(childAns || {}), [sqIdx.toString()]: e.target.value };
-                                      handleCaseChildAnswer(currentQ.id, cqIdx, nextMap);
+                                      const nextMap = {
+                                        ...(childAns || {}),
+                                        [sqIdx.toString()]: e.target.value,
+                                      };
+                                      handleCaseChildAnswer(currentQ.id, activeCaseChildIndex, nextMap);
                                     }}
-                                    className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
+                                    className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs sm:text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                                   >
                                     <option value="">-- Select option --</option>
                                     {(sq.options || []).map((opt) => (
@@ -1619,10 +2263,12 @@ export default function AZ305App() {
                                       </option>
                                     ))}
                                   </select>
-                                  {showAnswer && mode === "study" && (
+                                  {isRevealed && (
                                     <span
-                                      className={`text-xs px-2 py-0.5 rounded font-bold ${
-                                        isCorrect ? "text-emerald-400 bg-emerald-500/20" : "text-rose-400 bg-rose-500/20"
+                                      className={`text-xs px-2.5 py-1 rounded-md font-bold ${
+                                        isCorrect
+                                          ? "text-emerald-400 bg-emerald-500/20"
+                                          : "text-rose-400 bg-rose-500/20"
                                       }`}
                                     >
                                       Target: {sq.correctAnswer}
@@ -1635,144 +2281,283 @@ export default function AZ305App() {
                         </div>
                       )}
 
-                      {showAnswer && mode === "study" && cq.explanation && (
-                        <div className="text-xs text-slate-400 bg-slate-900/80 p-3 rounded-lg border border-slate-800 leading-relaxed">
-                          💡 {cq.explanation}
+                      {/* Child Question Navigation & Check Answer */}
+                      <div className="flex items-center justify-between pt-4 mt-2 border-t border-slate-800">
+                        <div className="flex items-center gap-2">
+                          <button
+                            disabled={activeCaseChildIndex <= 0}
+                            onClick={() =>
+                              setActiveCaseChildIndex((prev) => Math.max(0, prev - 1))
+                            }
+                            className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 text-xs text-slate-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          >
+                            ← Previous Question
+                          </button>
+
+                          <button
+                            disabled={activeCaseChildIndex >= currentQ.questions.length - 1}
+                            onClick={() =>
+                              setActiveCaseChildIndex((prev) =>
+                                Math.min(currentQ.questions!.length - 1, prev + 1)
+                              )
+                            }
+                            className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 text-xs text-slate-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          >
+                            Next Question →
+                          </button>
+                        </div>
+
+                        {mode === "study" && showAnswersAndExplanations && !isRevealed && (
+                          <button
+                            onClick={() =>
+                              setPartShowAnswer((prev) => ({
+                                ...prev,
+                                [`cq_${activeCaseChildIndex}`]: true,
+                              }))
+                            }
+                            className="px-4 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+                          >
+                            Check Question {activeCQ.questionNumber || activeCaseChildIndex + 1}
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Child Explanation */}
+                      {isRevealed && activeCQ.explanation && (
+                        <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-slate-300 leading-relaxed whitespace-pre-line animate-in fade-in duration-200">
+                          <div className="font-bold text-emerald-400 mb-1 flex items-center gap-1.5">
+                            <span>💡</span> Architectural Rationale:
+                          </div>
+                          {activeCQ.explanation}
                         </div>
                       )}
                     </div>
                   );
-                })}
+                })()}
               </div>
             )}
           </div>
 
-          {/* Navigation & Action Bar */}
-          <div className="mt-8 pt-6 border-t border-slate-800 flex flex-wrap items-center justify-between gap-4">
-            <div>
-              {mode === "study" && (
-                <button
-                  onClick={() => setShowAnswer(!showAnswer)}
-                  className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all shadow-md ${
-                    showAnswer
-                      ? "bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700"
-                      : "bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/20"
-                  }`}
-                >
-                  {showAnswer ? "Hide Explanation" : "Check Answer & Rationale"}
-                </button>
-              )}
-            </div>
-
+          {/* Action Bar: Check Answer & Rationale */}
+          <div className="mt-8 pt-5 border-t border-slate-800 flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <button
                 disabled={currentIndex === 0}
                 onClick={() => {
-                  setCurrentIndex((prev) => Math.max(0, prev - 1));
+                  setCurrentIndex((prev) => prev - 1);
                   setShowAnswer(false);
-                  setActiveCaseSection(0);
                 }}
-                className="px-4 py-2 rounded-xl text-sm font-medium bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold border border-slate-700 bg-slate-850 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 ← Previous
               </button>
               <button
                 disabled={currentIndex === activeQuestions.length - 1}
                 onClick={() => {
-                  setCurrentIndex((prev) => Math.min(activeQuestions.length - 1, prev + 1));
+                  setCurrentIndex((prev) => prev + 1);
                   setShowAnswer(false);
-                  setActiveCaseSection(0);
                 }}
-                className="px-5 py-2 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold border border-slate-700 bg-slate-850 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 Next →
               </button>
             </div>
-          </div>
-        </div>
 
-        {/* Architectural Explanation (Study Mode Only) */}
-        {showAnswer && mode === "study" && currentQ.explanation && (
-          <div className="bg-slate-900/90 border border-blue-500/30 rounded-3xl p-6 sm:p-7 shadow-xl shadow-blue-950/20">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <h3 className="text-base font-bold text-blue-400 flex items-center gap-2">
-                <span>💡 Architectural Explanation & Rationale</span>
-              </h3>
-              {currentQ.reference && (
-                <a
-                  href={currentQ.reference}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-blue-400 hover:text-blue-300 underline font-medium flex items-center gap-1"
-                >
-                  Microsoft Learn Reference ↗
-                </a>
+            {/* Check Answer Button (Practice Mode with answer display active) */}
+            {mode === "study" && showAnswersAndExplanations && !showAnswer && (
+              <button
+                onClick={handleCheckAnswer}
+                className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20 transition-all flex items-center gap-2"
+              >
+                <span>Check Answer & Rationale</span>
+              </button>
+            )}
+
+            {showAnswer && mode === "study" && (
+              <span className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20">
+                Answer & Explanation Revealed
+              </span>
+            )}
+          </div>
+
+          {/* Explanation Section */}
+          {showAnswer &&
+            mode === "study" &&
+            showAnswersAndExplanations &&
+            (currentQ.explanation ||
+              (currentQ.statements && currentQ.statements.some((s) => s.explanation)) ||
+              (currentQ.references && currentQ.references.length > 0) ||
+              currentQ.reference) && (
+              <div className="mt-6 p-5 sm:p-6 rounded-2xl bg-slate-950/80 border border-slate-800 flex flex-col gap-4 animate-in fade-in duration-200">
+                <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
+                  <span>💡</span>
+                  <span>Explanation & Architectural Rationale</span>
+                </div>
+
+                {currentQ.explanation && (
+                  <div className="text-xs sm:text-sm text-slate-300 leading-relaxed whitespace-pre-line">
+                    {currentQ.explanation}
+                  </div>
+                )}
+
+                {/* Statement Rationale Breakdown if present */}
+                {currentQ.statements &&
+                  currentQ.statements.some((s) => s.explanation) && (
+                    <div className="pt-3 border-t border-slate-850 space-y-2">
+                      <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                        Statement Rationale Breakdown:
+                      </div>
+                      {currentQ.statements.map(
+                        (s, sIdx) =>
+                          s.explanation && (
+                            <div
+                              key={sIdx}
+                              className="text-xs text-slate-300 bg-slate-900/60 p-3 rounded-xl border border-slate-800 leading-relaxed"
+                            >
+                              <div className="font-semibold text-slate-200 mb-1 flex items-center justify-between">
+                                <span>Statement {sIdx + 1}: {s.statement}</span>
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    s.correctAnswer === "Yes"
+                                      ? "bg-emerald-500/20 text-emerald-400"
+                                      : "bg-rose-500/20 text-rose-400"
+                                  }`}
+                                >
+                                  Correct: {s.correctAnswer}
+                                </span>
+                              </div>
+                              <p className="text-slate-400">{s.explanation}</p>
+                            </div>
+                          )
+                      )}
+                    </div>
+                  )}
+
+              {/* Wrong Options Explanation if present */}
+              {currentQ.wrongOptionsExplanation &&
+                Object.keys(currentQ.wrongOptionsExplanation).length > 0 && (
+                  <div className="pt-3 border-t border-slate-850">
+                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                      Why Other Options Are Incorrect:
+                    </div>
+                    <div className="space-y-2">
+                      {Object.entries(currentQ.wrongOptionsExplanation).map(
+                        ([optKey, exp], idx) => (
+                          <div
+                            key={idx}
+                            className="text-xs text-slate-400 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800"
+                          >
+                            <strong className="text-rose-400">{optKey}:</strong> {String(exp)}
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                )}
+
+              {/* References */}
+              {(currentQ.reference || currentQ.references) && (
+                <div className="pt-3 border-t border-slate-850 text-xs text-slate-400">
+                  <span className="font-semibold text-slate-300">
+                    Official Microsoft References:
+                  </span>
+                  <div className="flex flex-wrap gap-2 mt-1.5">
+                    {currentQ.references ? (
+                      currentQ.references.map((ref, rIdx) => (
+                        <span
+                          key={rIdx}
+                          className="px-2.5 py-1 rounded-md bg-slate-900 border border-slate-800 text-[11px] text-blue-400"
+                        >
+                          {ref}
+                        </span>
+                      ))
+                    ) : (
+                      <a
+                        href={currentQ.reference}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-400 underline hover:text-blue-300"
+                      >
+                        {currentQ.reference}
+                      </a>
+                    )}
+                  </div>
+                </div>
               )}
             </div>
-            <div className="text-sm text-slate-300 leading-relaxed whitespace-pre-line">
-              {currentQ.explanation}
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </main>
 
-      {/* Slide-in Question Palette */}
+      {/* Slide-over Question Palette */}
       {showPalette && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-slate-900 border-l border-slate-800 h-full p-6 flex flex-col shadow-2xl overflow-hidden">
+          <div className="w-full max-w-sm bg-slate-900 border-l border-slate-800 h-full p-6 flex flex-col shadow-2xl">
             <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-              <h2 className="text-lg font-bold text-white">Question Palette</h2>
+              <h3 className="font-bold text-base text-white">Question Palette</h3>
               <button
                 onClick={() => setShowPalette(false)}
-                className="w-8 h-8 rounded-lg bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center"
+                className="text-slate-400 hover:text-white p-1 rounded-lg"
               >
                 ✕
               </button>
             </div>
 
-            <div className="py-3 text-xs text-slate-400 flex items-center justify-between">
-              <span>{activeQuestions.length} Questions in Session</span>
-              <span className="font-semibold text-blue-400">
-                {Object.keys(userAnswers).length} Answered
+            <div className="flex items-center gap-3 my-4 text-xs text-slate-400">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Answered
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-slate-700" /> Unanswered
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="text-amber-400 font-bold">★</span> Bookmarked
               </span>
             </div>
 
-            <div className="flex-1 overflow-y-auto grid grid-cols-5 gap-2 p-1">
+            <div className="flex-1 overflow-y-auto grid grid-cols-5 gap-2 pr-1">
               {activeQuestions.map((q, idx) => {
-                const isCur = idx === currentIndex;
-                const hasAnswer = userAnswers[q.id] !== undefined;
-                const isFlag = flaggedIds.includes(q.id);
-
-                let btnStyle = "bg-slate-850 text-slate-300 border-slate-700/80";
-                if (isCur) {
-                  btnStyle = "ring-2 ring-blue-400 bg-blue-600 text-white font-bold";
-                } else if (isFlag) {
-                  btnStyle = "bg-amber-500/20 text-amber-300 border-amber-500/40";
-                } else if (hasAnswer) {
-                  btnStyle = "bg-blue-950/40 text-blue-300 border-blue-500/50";
-                }
+                const isCurrent = idx === currentIndex;
+                const isAnswered = userAnswers[q.id] !== undefined;
+                const isBookmarked = flaggedIds.includes(q.id);
 
                 return (
                   <button
                     key={q.id}
                     onClick={() => {
                       setCurrentIndex(idx);
-                      setShowPalette(false);
                       setShowAnswer(false);
-                      setActiveCaseSection(0);
+                      setShowPalette(false);
                     }}
-                    className={`h-11 rounded-xl text-xs font-medium border transition-all flex flex-col items-center justify-center relative ${btnStyle}`}
+                    className={`h-11 rounded-xl text-xs font-bold border transition-all relative flex flex-col items-center justify-center ${
+                      isCurrent
+                        ? "border-blue-400 ring-2 ring-blue-500 bg-blue-600/30 text-white"
+                        : isAnswered
+                        ? "border-blue-500/40 bg-blue-900/30 text-blue-200"
+                        : "border-slate-800 bg-slate-850 text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                    }`}
                   >
                     <span>{idx + 1}</span>
-                    <span className="text-[9px] text-slate-500">Q{q.id}</span>
-                    {isFlag && (
-                      <span className="absolute top-1 right-1 text-[8px] text-amber-400">
+                    {isBookmarked && (
+                      <span className="absolute top-1 right-1 text-[9px] text-amber-400">
                         ★
                       </span>
                     )}
                   </button>
                 );
               })}
+            </div>
+
+            <div className="pt-4 border-t border-slate-800">
+              <button
+                onClick={() => {
+                  setShowPalette(false);
+                  setView("results");
+                }}
+                className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors"
+              >
+                Finish & View Score Report
+              </button>
             </div>
           </div>
         </div>

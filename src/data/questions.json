@@ -557,7 +557,8 @@
       "Orchestration modes for Virtual Machine Scale Sets in Azure",
       "Availability sets overview",
       "Baseline highly available zone-redundant web application"
-    ]
+    ],
+    "explanation": "App Service plans scale out to a maximum of 30 instances on Premium v2/v3/v4 tiers, 100 instances on Isolated v2, and up to 200 instances total across an App Service Environment v3 (ASEv3) \u2014 far below the 1,000 scale-out instances required.\n\nVirtual Machine Scale Sets (VMSS) natively support up to 1,000 VM instances (when deployed from Marketplace or Azure Compute Gallery images) and can automatically distribute these instances across Availability Zones (multiple datacenters) within an Azure region, complete with metric-based CPU autoscaling.\n\nAvailability Sets only protect against hardware/rack failures within a single datacenter (fault/update domains) and cannot span Availability Zones (multiple datacenters). Additionally, Availability Sets are capped at 200 VMs max and do not support metric-based CPU autoscaling."
   },
   {
     "id": 16,
@@ -641,7 +642,8 @@
       "Highly available multi-region web application",
       "What are Azure regions and availability zones?",
       "Make all things redundant"
-    ]
+    ],
+    "explanation": "For mission-critical enterprise workloads with high resource budgets, multi-region active/passive or active/active deployments provide maximum resiliency against complete regional Azure outages.\n\nGeo-replication (supported by Azure SQL Database, Cosmos DB, etc.) ensures data redundancy across secondary regions, enabling read scale-out and fast regional failover.\n\nTo achieve redundancy, redundant VMs belonging to the same tier must be placed inside the SAME Availability Set so Azure guarantees they are separated across distinct fault domains (hardware/power/network) and update domains. Placing VMs in separate availability sets means Azure cannot coordinate rack placement, risking both VMs ending up on the same physical host or rack."
   },
   {
     "id": 19,
@@ -827,7 +829,8 @@
     "references": [
       "Cross-region replication in Azure: Business continuity and disaster recovery",
       "Azure Storage redundancy"
-    ]
+    ],
+    "explanation": "With a limited number of exceptions (for example, the Brazil South region, whose pair is South Central US), every Azure paired region is within the same geo-political boundary.\n\nAutomatic data replication via GRS does not guarantee that the data remains within the same geo-political boundaries (the Brazil South pairing is one case where the secondary region is in a different geo-political area).\n\nIf you want to reduce data storage costs and maintain intra-region redundancy, Azure zone-redundant storage (ZRS) can be used. ZRS replicates data across multiple datacenters (availability zones) within a single region, so the data remains within the same geographic boundary."
   },
   {
     "id": 24,
@@ -856,7 +859,8 @@
       "Apply an Azure Resource Manager lock to a storage account",
       "Data protection overview",
       "Enable and manage soft delete for containers"
-    ]
+    ],
+    "explanation": "The 'CanNotDelete' lock applied at the ARM resource level explicitly prevents any administrator or process from deleting the storage account resource until the lock is removed.\n\nARM Resource Locks operate strictly at the control plane (management plane). A CanNotDelete lock on a storage account does NOT block data plane operations; authorized users can still create, modify, overwrite, or delete individual containers and blobs inside the account (which requires Blob Immutability/WORM or Soft Delete).\n\nA 'CanNotDelete' lock only prevents deletion. Authorized users can still read and modify the storage account's configuration (such as network firewalls, tags, or access tiers). To block configuration changes, a 'ReadOnly' lock would be required."
   },
   {
     "id": 25,
@@ -1279,7 +1283,8 @@
     "references": [
       "Create and configure a self-hosted integration runtime",
       "High availability and scalability with self-hosted integration runtime in Azure Data Factory"
-    ]
+    ],
+    "explanation": "You are not required to configure separate self-hosted integration runtimes for each server. A single SHIR instance can connect to multiple on-premises data sources.\n\nA Windows machine can host only one SHIR node instance. Running multiple distinct SHIRs or setting up scale-out nodes requires installing each instance on a separate Windows machine.\n\nThe SHIR does not need to be installed on the source servers themselves. It can be hosted on any dedicated Windows server in the same local network that has network access to the source file shares."
   },
   {
     "id": 38,
@@ -1393,7 +1398,8 @@
       "Azure API Management policy reference - rate-limit",
       "Azure API Management policy reference - ip-filter",
       "Autoscale in Azure App Service"
-    ]
+    ],
+    "explanation": "API Management provides built-in request throttling and rate limiting via policies such as <rate-limit> and <rate-limit-by-key> to limit calls per second/minute and protect backend APIs from spikes.\n\nAPI Management supports inbound access restriction using the <ip-filter> policy, allowing you to permit or deny specific client IP addresses or CIDR blocks in a single centralized gateway.\n\nAPI Management cannot autoscale your backend API applications. Autoscaling the API backend logic is accomplished by configuring horizontal autoscale rules on the underlying Azure App Service Plan."
   },
   {
     "id": 42,
@@ -1590,7 +1596,8 @@
       "Autoscaling in Azure Kubernetes Service (AKS)",
       "Determine when to use Azure Container Instances versus Azure Kubernetes Service",
       "Microservices architecture on Azure Kubernetes Service (AKS)"
-    ]
+    ],
+    "explanation": "AKS provides enterprise-grade microservice orchestration and native Horizontal Pod Autoscaling (HPA) that dynamically scales pods based on CPU, memory, or custom metrics, allowing App1 and data connectors to scale automatically as new clients join.\n\nRunning standalone Docker containers on unmanaged VMs lacks automated service discovery, cluster-wide load balancing, and coordinated autoscaling, requiring excessive operational management.\n\nAzure Container Instances (ACI) is a lightweight serverless container hosting service for isolated, short-lived tasks, but it lacks an orchestration control plane, ingress controllers, and robust inter-service autoscaling required for complex microservice architectures."
   },
   {
     "id": 49,
@@ -1619,7 +1626,8 @@
       "About Azure Migrate",
       "Azure Migrate: Server Migration overview",
       "Migrate web apps to Azure App Service"
-    ]
+    ],
+    "explanation": "Azure Migrate: Server Migration tool natively supports agentless and agent-based migration of Hyper-V VMs, physical bare-metal servers, and AWS/GCP VMs to Azure VMs.\n\nThe 'Discovery and assessment' tool only assesses readiness, sizing, and cost estimation; it does not execute migrations. Furthermore, actual migration of non-relational databases (such as MongoDB) is performed using Azure Database Migration Service (DMS) targeting Azure Cosmos DB, not the discovery tool.\n\nAzure Migrate includes the Azure App Service Migration Assistant, which assesses and automates the migration of on-premises ASP.NET (IIS) and Java web applications directly to Azure App Service."
   },
   {
     "id": 50,
@@ -1938,7 +1946,8 @@
       "URL path-based routing overview with Azure Application Gateway",
       "Azure Front Door features and edge caching",
       "Comparing load-balancing options in Azure"
-    ]
+    ],
+    "explanation": "Azure Application Gateway operates at Layer 7 and natively supports path-based URL routing, allowing requests with '/photos/*' in the URI path to be directed to a dedicated backend pool optimized for image processing or static storage.\n\nApplication Gateway and Azure Front Door evaluate incoming Layer 7 HTTP requests (headers, paths, cookies). DNS-based traffic routing rules are configured using Azure Traffic Manager, not Application Gateway or Front Door directly.\n\nAzure Front Door includes built-in global Content Delivery Network (CDN) edge caching capabilities, serving static content from hundreds of Microsoft Global Edge Point-of-Presence (POP) locations closest to global users."
   },
   {
     "id": 60,
